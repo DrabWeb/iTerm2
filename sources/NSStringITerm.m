@@ -87,7 +87,7 @@
         NSMutableArray *escapedFilenames = [NSMutableArray array];
         DLog(@"Pasteboard has filenames: %@.", filenames);
         for (NSString *filename in filenames) {
-            [escapedFilenames addObject:[filename stringWithEscapedShellCharacters]];
+            [escapedFilenames addObject:[filename stringWithEscapedShellCharactersIncludingNewlines:YES]];
         }
         if (escapedFilenames.count > 0) {
             info = [escapedFilenames componentsJoinedByString:@" "];
@@ -103,12 +103,18 @@
 }
 
 + (NSString *)shellEscapableCharacters {
-    return @"\\ ()\"&'!$<>;|*?[]#`";
+    return @"\\ ()\"&'!$<>;|*?[]#`\t";
 }
 
-- (NSString *)stringWithEscapedShellCharacters {
+- (NSString *)stringWithEscapedShellCharactersIncludingNewlines:(BOOL)includingNewlines {
     NSMutableString *aMutableString = [[[NSMutableString alloc] initWithString:self] autorelease];
-    [aMutableString escapeShellCharacters];
+    [aMutableString escapeShellCharactersIncludingNewlines:includingNewlines];
+    return [NSString stringWithString:aMutableString];
+}
+
+- (NSString *)stringWithEscapedShellCharactersExceptTabAndNewline {
+    NSMutableString *aMutableString = [[[NSMutableString alloc] initWithString:self] autorelease];
+    [aMutableString escapeShellCharactersExceptTabAndNewline];
     return [NSString stringWithString:aMutableString];
 }
 
@@ -811,6 +817,29 @@ int decode_utf8_char(const unsigned char *datap,
 }
 
 - (NSString *)timestampConversionHelp {
+    NSDate *date;
+    date = [self dateValueFromUnix];
+    if (!date) {
+        date = [self dateValueFromUTC];
+    }
+    if (date) {
+        NSString *template;
+        if (fmod(date.timeIntervalSince1970, 1) > 0.001) {
+            template = @"yyyyMMMd hh:mm:ss.SSS z";
+        } else {
+            template = @"yyyyMMMd hh:mm:ss z";
+        }
+        NSDateFormatter *fmt = [[[NSDateFormatter alloc] init] autorelease];
+        [fmt setDateFormat:[NSDateFormatter dateFormatFromTemplate:template
+                                                           options:0
+                                                            locale:[NSLocale currentLocale]]];
+        return [fmt stringFromDate:date];
+    } else {
+        return nil;
+    }
+}
+
+- (NSDate *)dateValueFromUnix {
     static const NSUInteger kTimestampLength = 10;
     static const NSUInteger kJavaTimestampLength = 13;
     if ((self.length == kTimestampLength ||
@@ -821,25 +850,36 @@ int decode_utf8_char(const unsigned char *datap,
                 return nil;
             }
         }
-        NSDateFormatter *fmt = [[[NSDateFormatter alloc] init] autorelease];
         // doubles run out of precision at 2^53. The largest Java timestamp we will convert is less
         // than 2^41, so this is fine.
         NSTimeInterval timestamp = [self doubleValue];
-        NSString *template;
         if (self.length == kJavaTimestampLength) {
             // Convert milliseconds to seconds
             timestamp /= 1000.0;
-            template = @"yyyyMMMd hh:mm:ss.SSS z";
-        } else {
-            template = @"yyyyMMMd hh:mm:ss z";
         }
-        [fmt setDateFormat:[NSDateFormatter dateFormatFromTemplate:template
-                                                           options:0
-                                                            locale:[NSLocale currentLocale]]];
-        return [fmt stringFromDate:[NSDate dateWithTimeIntervalSince1970:timestamp]];
+        return [NSDate dateWithTimeIntervalSince1970:timestamp];
     } else {
         return nil;
     }
+}
+
+- (NSDate *)dateValueFromUTC {
+    NSArray<NSString *> *formats = @[ @"yyyy-MM-dd'T'HH:mm:ss.SSS'Z'",
+                                      @"yyyy-MM-dd't'HH:mm:ss.SSS'z'",
+                                      @"yyyy-MM-dd'T'HH:mm:ss'Z'",
+                                      @"yyyy-MM-dd't'HH:mm:ss'z'",
+                                      @"yyyy-MM-dd'T'HH:mm'Z'",
+                                      @"yyyy-MM-dd't'HH:mm'z'" ];
+    NSDateFormatter *dateFormatter = [[[NSDateFormatter alloc] init] autorelease];
+    for (NSString *format in formats) {
+        dateFormatter.dateFormat = format;
+        dateFormatter.locale = [[NSLocale alloc] initWithLocaleIdentifier:@"en_US_POSIX"];
+        NSDate *date = [dateFormatter dateFromString:self];
+        if (date) {
+            return date;
+        }
+    }
+    return nil;
 }
 
 - (NSString *)hexOrDecimalConversionHelp {
@@ -1631,6 +1671,38 @@ static TECObjectRef CreateTECConverterForUTF8Variants(TextEncodingVariant varian
     return range;
 }
 
+- (NSString *)stringByMakingControlCharactersToPrintable {
+    if (self.length == 0) {
+        return self;
+    }
+    NSMutableString *temp = [[self mutableCopy] autorelease];
+    for (NSInteger i = temp.length - 1; i >= 0; i--) {
+        unichar c = [temp characterAtIndex:i];
+        NSString *replacement = nil;
+        if (c >= 1 && c <= 26) {
+            replacement = [NSString stringWithFormat:@"^%c", c - 1 + 'A'];
+        } else if (c == 0) {
+            replacement = @"^@";
+        } else if (c == 27) {
+            replacement = @"^[";
+        } else if (c == 28) {
+            replacement = @"^\\";
+        } else if (c == 29) {
+            replacement = @"^]";
+        } else if (c == 30) {
+            replacement = @"^^";
+        } else if (c == 31) {
+            replacement = @"^_";
+        } else if (c == 127) {
+            replacement = @"^?";
+        }
+        if (replacement) {
+            [temp replaceCharactersInRange:NSMakeRange(i, 1) withString:replacement];
+        }
+    }
+    return temp;
+}
+
 @end
 
 @implementation NSMutableString (iTerm)
@@ -1647,8 +1719,20 @@ static TECObjectRef CreateTECConverterForUTF8Variants(TextEncodingVariant varian
     }
 }
 
-- (void)escapeShellCharacters {
+- (void)escapeShellCharactersExceptTabAndNewline {
+    NSString *charsToEscape = [[NSString shellEscapableCharacters] stringByReplacingOccurrencesOfString:@"\t" withString:@""];
+    return [self escapeCharacters:charsToEscape];
+}
+
+- (void)escapeShellCharactersIncludingNewlines:(BOOL)includingNewlines {
     NSString* charsToEscape = [NSString shellEscapableCharacters];
+    if (includingNewlines) {
+        charsToEscape = [charsToEscape stringByAppendingString:@"\r\n"];
+    }
+    [self escapeCharacters:charsToEscape];
+}
+
+- (void)escapeCharacters:(NSString *)charsToEscape {
     for (int i = 0; i < [charsToEscape length]; i++) {
         NSString* before = [charsToEscape substringWithRange:NSMakeRange(i, 1)];
         NSString* after = [@"\\" stringByAppendingString:before];

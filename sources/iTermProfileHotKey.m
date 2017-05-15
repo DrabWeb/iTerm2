@@ -35,7 +35,6 @@ static iTermAnimationDirection iTermAnimationDirectionOpposite(iTermAnimationDir
 }
 static NSString *const kGUID = @"GUID";
 static NSString *const kArrangement = @"Arrangement";
-static const NSTimeInterval kAnimationDuration = 0.25;
 
 @interface iTermProfileHotKey()
 @property(nonatomic, copy) NSString *profileGuid;
@@ -45,7 +44,9 @@ static const NSTimeInterval kAnimationDuration = 0.25;
 @property(nonatomic, retain) NSWindowController *windowControllerBeingBorn;
 @end
 
-@implementation iTermProfileHotKey
+@implementation iTermProfileHotKey {
+    BOOL _activationPending;
+}
 
 - (instancetype)initWithShortcuts:(NSArray<iTermShortcut *> *)shortcuts
           hasModifierActivation:(BOOL)hasModifierActivation
@@ -61,6 +62,10 @@ static const NSTimeInterval kAnimationDuration = 0.25;
         [[NSNotificationCenter defaultCenter] addObserver:self
                                                  selector:@selector(terminalWindowControllerCreated:)
                                                      name:kTerminalWindowControllerWasCreatedNotification
+                                                   object:nil];
+        [[NSNotificationCenter defaultCenter] addObserver:self
+                                                 selector:@selector(applicationDidBecomeActive:)
+                                                     name:NSApplicationDidBecomeActiveNotification
                                                    object:nil];
     }
     return self;
@@ -100,14 +105,16 @@ static const NSTimeInterval kAnimationDuration = 0.25;
     DLog(@"Create new window controller for profile hotkey");
     PseudoTerminal *windowController = [self windowControllerFromRestorableState];
     if (windowController) {
-        [[iTermController sharedInstance] launchBookmark:self.profile
-                                              inTerminal:windowController
-                                                 withURL:url.absoluteString
-                                        hotkeyWindowType:[self hotkeyWindowType]
-                                                 makeKey:YES
-                                             canActivate:YES
-                                                 command:nil
-                                                   block:nil];
+        if (url) {
+            [[iTermController sharedInstance] launchBookmark:self.profile
+                                                  inTerminal:windowController
+                                                     withURL:url.absoluteString
+                                            hotkeyWindowType:[self hotkeyWindowType]
+                                                     makeKey:YES
+                                                 canActivate:YES
+                                                     command:nil
+                                                       block:nil];
+        }
     } else {
         windowController = [self windowControllerFromProfile:[self profile] url:url];
     }
@@ -236,7 +243,7 @@ static const NSTimeInterval kAnimationDuration = 0.25;
     NSRect destination = [self preferredFrameForWindowController:self.windowController];
     self.windowController.window.alphaValue = 0;
     [NSAnimationContext runAnimationGroup:^(NSAnimationContext * _Nonnull context) {
-        [context setDuration:kAnimationDuration];
+        [context setDuration:[iTermAdvancedSettingsModel hotkeyTermAnimationDuration]];
         [context setTimingFunction:[CAMediaTimingFunction functionWithName:kCAMediaTimingFunctionEaseIn]];
         [self.windowController.window.animator setFrame:destination display:NO];
         [self.windowController.window.animator setAlphaValue:1];
@@ -247,12 +254,13 @@ static const NSTimeInterval kAnimationDuration = 0.25;
 }
 
 - (void)rollOutAnimatingInDirection:(iTermAnimationDirection)direction {
+    _activationPending = NO;
     NSRect source = self.windowController.window.frame;
     NSRect destination = source;
     destination.origin = [self hiddenOriginForScreen:self.windowController.window.screen];
 
     [NSAnimationContext runAnimationGroup:^(NSAnimationContext * _Nonnull context) {
-        [context setDuration:kAnimationDuration];
+        [context setDuration:[iTermAdvancedSettingsModel hotkeyTermAnimationDuration]];
         [context setTimingFunction:[CAMediaTimingFunction functionWithName:kCAMediaTimingFunctionEaseIn]];
         [self.windowController.window.animator setFrame:destination display:NO];
         [self.windowController.window.animator setAlphaValue:0];
@@ -276,7 +284,7 @@ static const NSTimeInterval kAnimationDuration = 0.25;
 
 - (void)fadeIn {
     [NSAnimationContext beginGrouping];
-    [[NSAnimationContext currentContext] setDuration:kAnimationDuration];
+    [[NSAnimationContext currentContext] setDuration:[iTermAdvancedSettingsModel hotkeyTermAnimationDuration]];
     [[NSAnimationContext currentContext] setCompletionHandler:^{
         [self rollInFinished];
     }];
@@ -286,7 +294,7 @@ static const NSTimeInterval kAnimationDuration = 0.25;
 
 - (void)fadeOut {
     [NSAnimationContext beginGrouping];
-    [[NSAnimationContext currentContext] setDuration:kAnimationDuration];
+    [[NSAnimationContext currentContext] setDuration:[iTermAdvancedSettingsModel hotkeyTermAnimationDuration]];
     [[NSAnimationContext currentContext] setCompletionHandler:^{
         [self didFinishRollingOut];
     }];
@@ -340,10 +348,13 @@ static const NSTimeInterval kAnimationDuration = 0.25;
     }
     _rollingIn = YES;
     if (self.hotkeyWindowType != iTermHotkeyWindowTypeFloatingPanel) {
+        DLog(@"Activate iTerm2 prior to animating hotkey window in");
+        _activationPending = YES;
         [NSApp activateIgnoringOtherApps:YES];
     }
     [self.windowController.window makeKeyAndOrderFront:nil];
     if (!animated) {
+        [self moveToPreferredScreen];
         self.windowController.window.alphaValue = 1;
         [self rollInFinished];
         return;
@@ -485,9 +496,28 @@ static const NSTimeInterval kAnimationDuration = 0.25;
     return self.windowController.window.alphaValue == 1 && self.windowController.window.isVisible;
 }
 
+- (void)cancelRollOut {
+    DLog(@"cancelRollOut requested");
+    if (_rollOutCancelable && _rollingOut) {
+        DLog(@"Cancelling roll out");
+        _rollingOut = NO;
+        _rollOutCancelable = NO;
+        [self orderOut];
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            if (_activationPending && ![NSApp isActive]) {
+                [NSApp activateIgnoringOtherApps:YES];
+            }
+        });
+    } else {
+        DLog(@"Cannot cancel. cancelable=%@ rollingOut=%@", @(_rollOutCancelable), @(_rollingOut));
+    }
+}
+
 #pragma mark - Protected
 
 - (NSArray<iTermBaseHotKey *> *)hotKeyPressedWithSiblings:(NSArray<iTermBaseHotKey *> *)genericSiblings {
+    DLog(@"hotKeypressedWithSiblings called on %@ with siblings %@", self, genericSiblings);
+
     genericSiblings = [genericSiblings arrayByAddingObject:self];
 
     NSArray<iTermProfileHotKey *> *siblings = [genericSiblings mapWithBlock:^id(iTermBaseHotKey *anObject) {
@@ -497,25 +527,31 @@ static const NSTimeInterval kAnimationDuration = 0.25;
             return nil;
         }
     }];
-    BOOL anyTransitioning = [siblings anyWithBlock:^BOOL(iTermBaseHotKey *sibling) {
-        if ([sibling isKindOfClass:[iTermProfileHotKey class]]) {
-            iTermProfileHotKey *other = (iTermProfileHotKey *)sibling;
-            return other.rollingIn || other.rollingOut;
-        } else {
-            return NO;
+    // If any sibling is rolling out but we can cancel the rollout, do so. This is after the window
+    // has finished animating out but we're in the delay period before activating the app the user
+    // was in before pressing the hotkey to reveal the hotkey window.
+    for (iTermProfileHotKey *other in siblings) {
+        if (other.rollingOut && other.rollOutCancelable) {
+            [other cancelRollOut];
         }
+    }
+    // If any sibling is rolling in or rolling out, do nothing. This keeps us from ending up in
+    // a broken state where some siblings are in and others are out.
+    BOOL anyTransitioning = [siblings anyWithBlock:^BOOL(iTermProfileHotKey *other) {
+        BOOL result = other.rollingIn || other.rollingOut;
+        if (result) {
+            DLog(@"Found a transitioning sibling: %@ rollingIn=%@ rollingOut=%@", other, @(other.rollingIn), @(other.rollingOut));
+        }
+        return result;
     }];
     if (anyTransitioning) {
+        DLog(@"One or more siblings is transitioning so I'm returning without doing anything.");
         return siblings;
     }
     DLog(@"toggle window %@. siblings=%@", self, siblings);
-    BOOL allSiblingsOpen = [siblings allWithBlock:^BOOL(iTermBaseHotKey *sibling) {
-        if ([sibling isKindOfClass:[iTermProfileHotKey class]]) {
-            iTermProfileHotKey *other = (iTermProfileHotKey *)sibling;
-            return other.isHotKeyWindowOpen;
-        } else {
-            return NO;
-        }
+    BOOL allSiblingsOpen = [siblings allWithBlock:^BOOL(iTermProfileHotKey *sibling) {
+        iTermProfileHotKey *other = (iTermProfileHotKey *)sibling;
+        return other.isHotKeyWindowOpen;
     }];
 
     BOOL anyIsKey = [siblings anyWithBlock:^BOOL(iTermProfileHotKey *anObject) {
@@ -524,7 +560,7 @@ static const NSTimeInterval kAnimationDuration = 0.25;
 
     DLog(@"Hotkey pressed. All open=%@  any is key=%@  siblings=%@",
          @(allSiblingsOpen), @(anyIsKey), siblings);
-    for (iTermProfileHotKey *sibling in [siblings arrayByAddingObject:self]) {
+    for (iTermProfileHotKey *sibling in [NSSet setWithArray:[siblings arrayByAddingObject:self]]) {
         DLog(@"Invoking handleHotkeyPressWithAllOpen:%@ anyIsKey:%@ on %@", @(allSiblingsOpen), @(anyIsKey), sibling);
         [sibling handleHotkeyPressWithAllOpen:allSiblingsOpen anyIsKey:anyIsKey];
     }
@@ -535,6 +571,15 @@ static const NSTimeInterval kAnimationDuration = 0.25;
     if (self.windowController.weaklyReferencedObject) {
         DLog(@"already have a hotkey window created");
         if (self.windowController.window.alphaValue == 1) {
+            if (self.windowController.openInCurrentSpace && !self.windowController.window.isOnActiveSpace) {
+                DLog(@"Move already-open hotkey window to current space");
+                NSWindow *window = self.windowController.window;
+                // I tested this on 10.12 and it's sufficient to move the window. Maybe not in older OS versions?
+                NSWindowCollectionBehavior collectionBehavior = window.collectionBehavior;
+                window.collectionBehavior = (collectionBehavior | NSWindowCollectionBehaviorCanJoinAllSpaces);
+                window.collectionBehavior = collectionBehavior;
+                return;
+            }
             DLog(@"hotkey window opaque");
             if (!allSiblingsOpen) {
                 DLog(@"Not all siblings open. Doing nothing.");
@@ -574,7 +619,7 @@ static const NSTimeInterval kAnimationDuration = 0.25;
 
 - (iTermHotkeyWindowType)hotkeyWindowType {
     if (self.floats) {
-        if ([iTermProfilePreferences unsignedIntegerForKey:KEY_SPACE inProfile:self.profile] == iTermProfileJoinsAllSpaces) {
+        if ([iTermProfilePreferences intForKey:KEY_SPACE inProfile:self.profile] == iTermProfileJoinsAllSpaces) {
             // This makes it possible to overlap Lion fullscreen windows.
             return iTermHotkeyWindowTypeFloatingPanel;
         } else {
@@ -627,12 +672,14 @@ static const NSTimeInterval kAnimationDuration = 0.25;
 
 - (void)didFinishRollingOut {
     DLog(@"didFinishRollingOut");
-
+    _activationPending = NO;
     DLog(@"Invoke willFinishRollingOutProfileHotKey:");
     BOOL activatingOtherApp = [self.delegate willFinishRollingOutProfileHotKey:self];
     if (activatingOtherApp) {
+        _rollOutCancelable = YES;
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
             if (_rollingOut) {
+                _rollOutCancelable = NO;
                 [self orderOut];
             }
         });
@@ -731,9 +778,8 @@ static const NSTimeInterval kAnimationDuration = 0.25;
         [self fastHideHotKeyWindow];
     }
 
-    // This used to iterate over hotkeyTerm.window.sheets, which seemed to
-    // work, but sheets wasn't defined prior to 10.9. Consider going back to
-    // that technique if this doesn't work well.
+    // If there are any problems here, iterate over self.windowController.window.sheets which was
+    // added in 10.9. This is a workaround from before we dropped 10.8.
     while (self.windowController.window.attachedSheet) {
         [NSApp endSheet:self.windowController.window.attachedSheet];
     }
@@ -761,4 +807,7 @@ static const NSTimeInterval kAnimationDuration = 0.25;
     }
 }
 
+- (void)applicationDidBecomeActive:(NSNotification *)notification {
+    _activationPending = NO;
+}
 @end

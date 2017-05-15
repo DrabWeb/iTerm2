@@ -12,14 +12,16 @@
 #import "iTermApplication.h"
 #import "iTermApplicationDelegate.h"
 #import "iTermAdvancedSettingsModel.h"
+#import "iTermFakeUserDefaults.h"
 #import "iTermPreferences.h"
 #import "iTermSelectorSwizzler.h"
 #import <objc/runtime.h>
 #import <XCTest/XCTest.h>
-#import <OCHamcrest/OCHamcrest.h>
-#import <OCMockito/OCMockito.h>
 
 #define NUM_DIFF_BUCKETS 10
+#define STRINGIFY(s) #s
+#define STRINGIFY_MACRO(m) STRINGIFY(m)
+
 typedef struct {
     CGFloat variance;
     CGFloat maxDiff;
@@ -407,7 +409,7 @@ static NSString *const kDiffScriptPath = @"/tmp/diffs";
 - (void)textViewRestartWithConfirmation {
 }
 
-- (void)setFindString:(NSString *)aString forwardDirection:(BOOL)direction ignoringCase:(BOOL)ignoreCase regex:(BOOL)regex startingAtX:(int)x startingAtY:(int)y withOffset:(int)offsetof inContext:(FindContext *)context multipleResults:(BOOL)multipleResults {
+- (void)setFindString:(NSString *)aString forwardDirection:(BOOL)direction mode:(iTermFindMode)mode startingAtX:(int)x startingAtY:(int)y withOffset:(int)offsetof inContext:(FindContext *)context multipleResults:(BOOL)multipleResults {
 }
 
 - (PTYTask *)shell {
@@ -462,8 +464,8 @@ static NSString *const kDiffScriptPath = @"/tmp/diffs";
 - (void)textViewSelectNextTab {
 }
 
-- (BOOL)textViewUseHFSPlusMapping {
-    return NO;
+- (iTermUnicodeNormalization)textViewUnicodeNormalizationForm {
+    return iTermUnicodeNormalizationNone;
 }
 
 - (BOOL)xtermMouseReporting {
@@ -533,6 +535,13 @@ static NSString *const kDiffScriptPath = @"/tmp/diffs";
     return 9;
 }
 
+- (NSURL *)textViewCurrentLocation {
+    return nil;
+}
+
+- (void)textViewBurySession {
+}
+
 - (BOOL)continueFindAllResults:(NSMutableArray *)results inContext:(FindContext *)context {
     return NO;
 }
@@ -594,7 +603,7 @@ static NSString *const kDiffScriptPath = @"/tmp/diffs";
 
 - (PTYSession *)sessionWithProfileOverrides:(NSDictionary *)profileOverrides
                                        size:(VT100GridSize)size {
-    PTYSession *session = [[[PTYSession alloc] init] autorelease];
+    PTYSession *session = [[[PTYSession alloc] initSynthetic:NO] autorelease];
     NSString* plistFile = [[NSBundle bundleForClass:[self class]]
                            pathForResource:@"DefaultBookmark"
                            ofType:@"plist"];
@@ -758,6 +767,15 @@ static NSString *const kDiffScriptPath = @"/tmp/diffs";
         if (ok) {
             NSLog(@"Tests “%@” ok with variance: %f. Max diff: %f", name, stats.variance, stats.maxDiff);
         } else {
+            char *projectDir = STRINGIFY_MACRO(PROJECT_DIR);
+            NSString *sourceFolder = [NSString stringWithUTF8String:projectDir];
+            if (sourceFolder && ![[[iTermApplication sharedApplication] delegate] isRunningOnTravis]) {
+                NSData *pngData = [actual dataForFileOfType:NSPNGFileType];
+                NSString *sourceName = [[[[sourceFolder stringByAppendingPathComponent:@"tests/Goldens"] stringByAppendingPathComponent:@"PTYTextViewTest-golden-"] stringByAppendingString:name] stringByAppendingString:@".png"];
+                [pngData writeToFile:sourceName atomically:NO];
+                NSLog(@"Wrote to golden file at %@", sourceName);
+            }
+
             NSString *failPath = [NSString stringWithFormat:@"/tmp/failed-%@.png", name];
             [[actual dataForFileOfType:NSPNGFileType] writeToFile:failPath atomically:NO];
             NSLog(@"nTest “%@” about to fail.\nActual output in %@.\nExpected output in %@",
@@ -2236,8 +2254,7 @@ static NSString *const kDiffScriptPath = @"/tmp/diffs";
                               [textView resetFindCursor];
                               [textView findString:@"xx"
                                   forwardDirection:NO
-                                      ignoringCase:NO
-                                             regex:NO
+                                              mode:iTermFindModeCaseSensitiveSubstring
                                         withOffset:0];
                               double progress;
                               while ([textView findInProgress]) {
@@ -2457,13 +2474,13 @@ static NSString *const kDiffScriptPath = @"/tmp/diffs";
     _textView.dataSource = session.screen;
     NSString *text = @"123456789";
     [session synchronousReadTask:text];
-    NSUserDefaults *mockDefaults = MKTMock([NSUserDefaults class]);
-    [MKTGiven([mockDefaults objectForKey:kPreferenceKeyCopyLastNewline]) willReturn:@YES];
-    [MKTGiven([mockDefaults objectForKey:@"TrimWhitespaceOnCopy"]) willReturn:@YES];
+    iTermFakeUserDefaults *fakeDefaults = [[[iTermFakeUserDefaults alloc] init] autorelease];
+    [fakeDefaults setFakeObject:@YES forKey:kPreferenceKeyCopyLastNewline];
+    [fakeDefaults setFakeObject:@YES forKey:@"TrimWhitespaceOnCopy"];
 
     [iTermSelectorSwizzler swizzleSelector:@selector(standardUserDefaults)
                                  fromClass:[NSUserDefaults class]
-                                 withBlock:^ id { return mockDefaults; }
+                                 withBlock:^ id { return fakeDefaults; }
                                   forBlock:^{
                                       // When
                                       [_textView selectAll:nil];
@@ -2480,13 +2497,13 @@ static NSString *const kDiffScriptPath = @"/tmp/diffs";
     _textView.dataSource = session.screen;
     NSString *text = @"123456789abc";
     [session synchronousReadTask:text];
-    NSUserDefaults *mockDefaults = MKTMock([NSUserDefaults class]);
-    [MKTGiven([mockDefaults objectForKey:kPreferenceKeyCopyLastNewline]) willReturn:@YES];
-    [MKTGiven([mockDefaults objectForKey:@"TrimWhitespaceOnCopy"]) willReturn:@YES];
+    iTermFakeUserDefaults *fakeDefaults = [[[iTermFakeUserDefaults alloc] init] autorelease];
+    [fakeDefaults setFakeObject:@YES forKey:kPreferenceKeyCopyLastNewline];
+    [fakeDefaults setFakeObject:@YES forKey:@"TrimWhitespaceOnCopy"];
 
     [iTermSelectorSwizzler swizzleSelector:@selector(standardUserDefaults)
                                  fromClass:[NSUserDefaults class]
-                                 withBlock:^ id { return mockDefaults; }
+                                 withBlock:^ id { return fakeDefaults; }
                                   forBlock:^{
                                       // When
                                       [_textView selectAll:nil];
@@ -2503,13 +2520,13 @@ static NSString *const kDiffScriptPath = @"/tmp/diffs";
     _textView.dataSource = session.screen;
     NSString *text = @"123456789abcdefghi";
     [session synchronousReadTask:text];
-    NSUserDefaults *mockDefaults = MKTMock([NSUserDefaults class]);
-    [MKTGiven([mockDefaults objectForKey:kPreferenceKeyCopyLastNewline]) willReturn:@YES];
-    [MKTGiven([mockDefaults objectForKey:@"TrimWhitespaceOnCopy"]) willReturn:@YES];
+    iTermFakeUserDefaults *fakeDefaults = [[[iTermFakeUserDefaults alloc] init] autorelease];
+    [fakeDefaults setFakeObject:@YES forKey:kPreferenceKeyCopyLastNewline];
+    [fakeDefaults setFakeObject:@YES forKey:@"TrimWhitespaceOnCopy"];
 
     [iTermSelectorSwizzler swizzleSelector:@selector(standardUserDefaults)
                                  fromClass:[NSUserDefaults class]
-                                 withBlock:^ id { return mockDefaults; }
+                                 withBlock:^ id { return fakeDefaults; }
                                   forBlock:^{
                                       // When
                                       [_textView selectAll:nil];
@@ -2538,13 +2555,13 @@ static NSString *const kDiffScriptPath = @"/tmp/diffs";
     _textView.dataSource = session.screen;
     NSString *text = @"blah\r\n12345";
     [session synchronousReadTask:text];
-    NSUserDefaults *mockDefaults = MKTMock([NSUserDefaults class]);
-    [MKTGiven([mockDefaults objectForKey:kPreferenceKeyCopyLastNewline]) willReturn:@YES];
-    [MKTGiven([mockDefaults objectForKey:@"TrimWhitespaceOnCopy"]) willReturn:@YES];
+    iTermFakeUserDefaults *fakeDefaults = [[[iTermFakeUserDefaults alloc] init] autorelease];
+    [fakeDefaults setFakeObject:@YES forKey:kPreferenceKeyCopyLastNewline];
+    [fakeDefaults setFakeObject:@YES forKey:@"TrimWhitespaceOnCopy"];
 
     [iTermSelectorSwizzler swizzleSelector:@selector(standardUserDefaults)
                                  fromClass:[NSUserDefaults class]
-                                 withBlock:^ id { return mockDefaults; }
+                                 withBlock:^ id { return fakeDefaults; }
                                   forBlock:^{
                                       // When
                                       [_textView selectAll:nil];
@@ -2611,6 +2628,9 @@ static NSString *const kDiffScriptPath = @"/tmp/diffs";
 
 - (void)refresh {
     [self registerCall:_cmd];
+}
+
+- (void)textViewDidFindDirtyRects {
 }
 
 @end

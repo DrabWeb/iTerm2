@@ -32,6 +32,19 @@ DEFINE_BOOL(name, theDefault, theDescription) \
                                                         object:nil]; \
 }
 
+#define DEFINE_OPTIONAL_BOOL(name, theDefault, theDescription) \
++ (BOOL *)name { \
+    NSString *theIdentifier = [@#name stringByCapitalizingFirstLetter]; \
+    return [iTermAdvancedSettingsViewController optionalBoolForIdentifier:theIdentifier \
+                                                             defaultValue:theDefault \
+                                                              description:theDescription]; \
+} \
++ (NSString *)name##UserDefaultsKey { \
+    NSString *theIdentifier = [@#name stringByCapitalizingFirstLetter]; \
+    return theIdentifier; \
+}
+
+
 #define DEFINE_INT(name, theDefault, theDescription) \
 + (int)name { \
     NSString *theIdentifier = [@#name stringByCapitalizingFirstLetter]; \
@@ -76,6 +89,7 @@ DEFINE_BOOL(eliminateCloseButtons, NO, @"Tabs: Eliminate close buttons from tabs
 DEFINE_FLOAT(tabAutoShowHoldTime, 1.0, @"Tabs: How long in seconds to show tabs in fullscreen.\nThe tab bar appears briefly in fullscreen when the number of tabs changes or you switch tabs. This setting gives the time in seconds for it to remain visible.");
 DEFINE_FLOAT(tabFlashAnimationDuration, 0.25, @"Tabs: Animation duration for fade in/out animation of tabs in full screen, in seconds.")
 DEFINE_BOOL(allowDragOfTabIntoNewWindow, YES, @"Tabs: Allow a tab to be dragged and dropped outside any existing tab bar to create a new window.");
+DEFINE_INT(minimumTabDragDistance, 10, @"Tabs: How far must the mouse move before a tab drag is initiated?\nYou must restart iTerm2 after changing this setting for it to take effect.");
 
 #pragma mark Mouse
 DEFINE_STRING(alternateMouseScrollStringForUp, @"",
@@ -113,6 +127,8 @@ DEFINE_BOOL(requireCmdForDraggingText, NO, @"Terminal: To drag images or selecte
 DEFINE_BOOL(focusReportingEnabled, YES, @"Terminal: Apps may turn on Focus Reporting.\nFocus reporting causes iTerm2 to send an escape sequence when a session gains or loses focus. It can cause problems when an ssh session dies unexpectedly because it gets left on, so some users prefer to disable it.");
 DEFINE_BOOL(useColorfgbgFallback, YES, @"Terminal: Use fallback for COLORFGBG if no exact match found?\nThe COLORFGBG variable indicates the ANSI colors that match the foreground and background colors. If no colors match and this setting is enabled, then the variable will be set to 15;0 to indicate a dark background or 0;15 to indicate a light background.");
 DEFINE_BOOL(zeroWidthSpaceAdvancesCursor, YES, @"Terminal: Zero-Width Space (U+200B) advances cursor?\nWhile a zero-width space should not advance the cursor per the Unicode spec, both Terminal.app and Konsole do this, and Weechat depends on it. You must restart iTerm2 after changing this setting.");
+DEFINE_BOOL(fullHeightCursor, NO, @"Terminal: Cursor occupies line spacing area.\nIf lines have more than 100% vertical spacing and this setting is enabled the bottom of the cursor will be aligned to the bottom of the spacing area.");
+DEFINE_FLOAT(underlineCursorOffset, 0, @"Terminal: Vertical offset for underline cursor.\nPositive values move it up, negative values move it down.");
 
 #pragma mark Hotkey
 DEFINE_FLOAT(hotkeyTermAnimationDuration, 0.25, @"Hotkey: Duration in seconds of the hotkey window animation.\nWarning: reducing this value may cause problems if you have multiple displays.");
@@ -139,6 +155,7 @@ DEFINE_FLOAT(pointSizeOfTimeStamp, 10, @"General: Point size for timestamps");
 DEFINE_INT(terminalMargin, 5, @"General: Width of left and right margins in terminal panes\nHow much space to leave between the left and right edges of the terminal.\nYou must restart iTerm2 after modifying this property. Saved window arrangements should be re-created.");
 DEFINE_INT(terminalVMargin, 2, @"General: Height of top and bottom margins in terminal panes\nHow much space to leave between the top and bottom edges of the terminal.\nYou must restart iTerm2 after modifying this property. Saved window arrangements should be re-created.");
 DEFINE_BOOL(zippyTextDrawing, YES, @"General: Use zippy text drawing algorithm?\nThis draws non-ASCII text more quickly but with lower fidelity. This setting is ignored if ligatures are enabled in Prefs > Profiles > Text.");
+DEFINE_BOOL(useVirtualKeyCodesForDetectingDigits, YES, @"General: On keyboards that require a modifier to press a digit, do not require that modifier for switching between windows, tabs, and panes by number.\nFor example, AZERTY requires you to hold down Shift to enter a number. To switch tabs with Cmd+Number on an AZERTY keyboard, you must enable this setting. Then, for example, Cmd-& switches to tab 1. When this setting is enabled, some user-defined shortcuts may become unavailable because the tab/window/pane switching behavior takes precedence.");
 
 #pragma mark - Semantic History
 DEFINE_BOOL(ignoreHardNewlinesInURLs, NO, @"Semantic History: Ignore hard newlines for the purposes of locating URLs and file names for Semantic History.\nIf a hard newline occurs at the end of a line then cmd-click will not see it all unless this setting is turned on. This is useful for some interactive applications. Turning this on will remove newlines from the \\3 and \\4 substitutions.");
@@ -151,12 +168,18 @@ DEFINE_BOOL(performDNSLookups, YES, @"Semantic History: Perform DNS lookups to c
 #pragma mark - Debugging
 DEFINE_BOOL(startDebugLoggingAutomatically, NO, @"Debugging: Start debug logging automatically when iTerm2 is launched.");
 DEFINE_BOOL(logDrawingPerformance, NO, @"Debugging: Log stats about text drawing performance to console.\nUsed for performance testing.");
+DEFINE_BOOL(logRestorableStateSize, NO, @"Debugging: Log restorable state size info to /tmp/statesize.*.txt.");
 
 #pragma mark - Session
 DEFINE_BOOL(runJobsInServers, YES, @"Session: Enable session restoration.\nSession restoration runs jobs in separate processes. They will survive crashes, force quits, and upgrades.\nYou must restart iTerm2 for this change to take effect.");
 DEFINE_BOOL(killJobsInServersOnQuit, YES, @"Session: User-initiated Quit (⌘Q) of iTerm2 will kill all running jobs.\nApplies only when session restoration is on.");
 DEFINE_SETTABLE_BOOL(suppressRestartAnnouncement, SuppressRestartAnnouncement, NO, @"Session: Suppress the Restart Session offer.\nWhen a sessions terminates, it will offer to restart itself. Turn this on to suppress the offer permanently.");
 DEFINE_BOOL(showSessionRestoredBanner, YES, @"Session: When restoring a session without restoring a running job, draw a banner saying “Session Restored” below the restored contents.");
+DEFINE_STRING(autoLogFormat,
+              @"\\(session.creationTimeString).\\(session.name).\\(session.termid).\\(iterm2.pid).\\(session.autoLogId).log",
+              @"Session: Format for automatic session log filenames.\nSee the Badges documentation for supported substitutions.");
+
+
 
 #pragma mark - Window
 DEFINE_BOOL(openFileInNewWindows, NO, @"Windows: Open files in new windows, not new tabs.\nThis affects shell scripts opened from Finder, for example.");
@@ -168,6 +191,7 @@ DEFINE_BOOL(fontChangeAffectsBroadcastingSessions, NO, @"Windows: Should growing
 
 #pragma mark tmux
 DEFINE_BOOL(noSyncNewWindowOrTabFromTmuxOpensTmux, NO, @"Tmux Integration: Suppress alert asking what kind of tab/window to open in tmux integration.");
+DEFINE_BOOL(tmuxUsesDedicatedProfile, YES, @"Tmux Integration: Tmux always uses the “tmux” profile.\nIf disabled, tmux sessions use the profile of the session you ran tmux -CC in.");
 
 #pragma mark Warnings
 DEFINE_BOOL(neverWarnAboutMeta, NO, @"Warnings: Suppress a warning when Option Key Acts as Meta is enabled in Prefs>Profiles>Keys.");
@@ -188,11 +212,15 @@ DEFINE_BOOL(noSyncSuppressCaptureOutputToolNotVisibleWarning, NO,
 DEFINE_BOOL(closingTmuxWindowKillsTmuxWindows, NO, @"Warnings: Suppress kill/hide dialog when closing a tmux window.");
 DEFINE_BOOL(closingTmuxTabKillsTmuxWindows, NO, @"Warnings: Suppress kill/hide dialog when closing a tmux tab.");
 DEFINE_BOOL(aboutToPasteTabs, NO, @"Warnings: Suppress warning about pasting tabs with offer to convert them to spaces.");
+DEFINE_FLOAT(shortLivedSessionDuration, 3, @"Warnings: Warn about short-lived sessions that live less than this many seconds.");
 
 DEFINE_SETTABLE_BOOL(noSyncDoNotWarnBeforeMultilinePaste, NoSyncDoNotWarnBeforeMultilinePaste, NO, @"Warnings: Suppress warning about multi-line pastes (or a single line ending in a newline).\nThis applies whether you are at the shell prompt or not, provided two or more lines are being pasted.");
 DEFINE_SETTABLE_BOOL(noSyncDoNotWarnBeforePastingOneLineEndingInNewlineAtShellPrompt, NoSyncDoNotWarnBeforePastingOneLineEndingInNewlineAtShellPrompt, NO, @"Warnings: Suppress warning about pasting a single line ending in a newline when at the shell prompt.\nThis requires Shell Integration to be installed.");
 
 DEFINE_BOOL(noSyncReplaceProfileWarning, NO, @"Warnings: Suppress warning about copying a session's settings over a Profile");
+DEFINE_OPTIONAL_BOOL(noSyncTurnOffFocusReportingOnHostChange, nil, @"Warnings: Always turn off focus reporting when host changes?");
+DEFINE_OPTIONAL_BOOL(noSyncTurnOffMouseReportingOnHostChange, nil, @"Warnings: Always turn off mouse reporting when host changes?");
+DEFINE_OPTIONAL_BOOL(noSyncTurnOffBracketedPasteOnHostChange, nil, @"Warnings: Always turn off paste bracketing when host changes?");
 
 #pragma mark Pasteboard
 DEFINE_BOOL(trimWhitespaceOnCopy, YES, @"Pasteboard: Trim whitespace when copying to pasteboard.");
@@ -204,7 +232,10 @@ DEFINE_BOOL(copyWithStylesByDefault, NO, @"Pasteboard: Copy to pasteboard on sel
 DEFINE_INT(pasteHistoryMaxOptions, 20, @"Pasteboard: Number of entires to save in Paste History.\n.");
 DEFINE_BOOL(disallowCopyEmptyString, NO, @"Pasteboard: Disallow copying empty string to pasteboard.\nIf enabled, selecting an empty string (or all whitespace if trimming is enabled) will not erase the contents of the pasteboard.");
 DEFINE_BOOL(typingClearsSelection, YES, @"Pasteboard: Pressing a key will remove the selection.");
-DEFINE_BOOL(promptForPasteWhenNotAtPrompt, NO, @"Pasteboard: Warn before pasting when not at shell prompt?");
+DEFINE_SETTABLE_BOOL(promptForPasteWhenNotAtPrompt, PromptForPasteWhenNotAtPrompt, NO, @"Pasteboard: Warn before pasting when not at shell prompt?");
+DEFINE_SETTABLE_BOOL(noSyncSuppressClipboardAccessDeniedWarning, NoSyncSuppressClipboardAccessDeniedWarning, NO, @"Session: Suppress the notification that the terminal attempted to access the clipboard but it was denied?");
+DEFINE_SETTABLE_BOOL(noSyncSuppressMissingProfileInArrangementWarning, NoSyncSuppressMissingProfileInArrangementWarning, NO, @"Session: Suppress the notification that a restored session’s profile no longer exists?");
+DEFINE_BOOL(excludeBackgroundColorsFromCopiedStyle, NO, @"Pasteboard: Exclude background colors when text is copied with color and font style?");
 
 #pragma mark - Tip of the day
 
@@ -216,21 +247,33 @@ DEFINE_STRING(badgeFont, @"Helvetica", @"Badge: Font to use for the badge.");
 DEFINE_BOOL(badgeFontIsBold, YES, @"Badge: Should the badge render in bold type?");
 DEFINE_FLOAT(badgeMaxWidthFraction, 0.5, @"Badge: Maximum width of the badge\nAs a fraction of the width of the terminal, between 0 and 1.0.");
 DEFINE_FLOAT(badgeMaxHeightFraction, 0.2, @"Badge: Maximum height of the badge\nAs a fraction of the height of the terminal, between 0 and 1.0.");
-DEFINE_INT(badgeRightMargin, 10, @"Badge: Right Margin\nHow much space to leave between the right edge of the badge and the right edge of the terminal.");
-DEFINE_INT(badgeTopMargin, 10, @"Badge: Top Margin\nHow much space to leave between the top edge of the badge and the top edge of the terminal.");
+DEFINE_INT(badgeRightMargin, 10, @"Badge: Right Margin for the badge\nHow much space to leave between the right edge of the badge and the right edge of the terminal.");
+DEFINE_INT(badgeTopMargin, 10, @"Badge: Top Margin for the badge\nHow much space to leave between the top edge of the badge and the top edge of the terminal.");
 
 #pragma mark - Experimental Features
-DEFINE_BOOL(includePasteHistoryInAdvancedPaste, NO, @"Experimental Features: Include paste history in the advanced paste menu.");
-DEFINE_BOOL(tolerateUnrecognizedTmuxCommands, NO, @"Experimental Features: Tolerate unrecognized commands from server.\nNormally, an unknown command from tmux will not end the session.");
-DEFINE_BOOL(serializeOpeningMultipleFullScreenWindows, NO, @"Experimental Features: When opening multiple fullscreen windows, enter fullscreen one window at a time.");
+DEFINE_BOOL(includePasteHistoryInAdvancedPaste, YES, @"Experimental Features: Include paste history in the advanced paste menu.");
+
+// This used to be on by default. Experiment with setting to to NO: it'll make ssh nicer.
+DEFINE_BOOL(tolerateUnrecognizedTmuxCommands, NO, @"Experimental Features: Tolerate unrecognized commands from server.\nNormally, an unknown command from tmux will not end the session. Turning this off helps detect dead ssh sessions.");
+DEFINE_BOOL(serializeOpeningMultipleFullScreenWindows, YES, @"Experimental Features: When opening multiple fullscreen windows, enter fullscreen one window at a time.");
 DEFINE_BOOL(useAdaptiveFrameRate, YES, @"Experimental Features: Use adaptive framerate.\nWhen throughput is low, the screen will update at 60 frames per second. When throughput is higher, it will update at 30 frames per second.");
 DEFINE_FLOAT(slowFrameRate, 15.0, @"Experimental Features: When adaptive framerate is enabled, refresh at this rate during high throughput conditions (FPS).");
 DEFINE_INT(adaptiveFrameRateThroughputThreshold, 10000, @"Experimental Features: Throughput threshold for adaptive frame rate.\nIf more than this many bytes per second are received, use the lower frame rate of 30 fps.");
-DEFINE_BOOL(tabTitlesUseSmartTruncation, NO, @"Experimental Features: Use “smart truncation” for tab titles.\nIf a tab‘s title is too long to fit, ellipsize the start of the title if more tabs have unique suffixes than prefixes in a given window.");
-DEFINE_BOOL(experimentalKeyHandling, NO, @"Experimental Features: Improved support for input method editors like AquaSKK.");
-DEFINE_BOOL(hideStuckTooltips, NO, @"Experimental Features: Hide stuck tooltips.\nWhen you hide iTerm2 using a hotkey while a tooltip is fading out it gets stuck because of an OS bug. Work around it with a nasty hack by enabling this feature.")
-DEFINE_BOOL(showYellowMarkForJobStoppedBySignal, NO, @"Experimental Features: Use a yellow for a Shell Integration prompt mark when the job is stopped by a signal.");
+DEFINE_BOOL(tabTitlesUseSmartTruncation, YES, @"Experimental Features: Use “smart truncation” for tab titles.\nIf a tab‘s title is too long to fit, ellipsize the start of the title if more tabs have unique suffixes than prefixes in a given window.");
+DEFINE_BOOL(experimentalKeyHandling, YES, @"Experimental Features: Improved support for input method editors like AquaSKK.");
+DEFINE_BOOL(hideStuckTooltips, YES, @"Experimental Features: Hide stuck tooltips.\nWhen you hide iTerm2 using a hotkey while a tooltip is fading out it gets stuck because of an OS bug. Work around it with a nasty hack by enabling this feature.")
+DEFINE_BOOL(showYellowMarkForJobStoppedBySignal, YES, @"Experimental Features: Use a yellow for a Shell Integration prompt mark when the job is stopped by a signal.");
 DEFINE_BOOL(openFileOverridesSendText, YES, @"Experimental Features: Should opening a script with iTerm2 disable the default profile's “Send Text at Start” setting?\nIf you use “open iTerm2 file.command” or drag a script onto iTerm2's icon and this setting is enabled then the script will be executed inl lieu of the profile's “Send Text at Start” setting. If this setting is off then both will be executed.");
+
+// This is half implemented and should not be turned on by default.
 DEFINE_BOOL(useLayers, NO, @"Experimental Features: Use Core Animation layers for opaque terminal views");
+
+DEFINE_BOOL(acceptOSC7, YES, @"Experimental Features: Accept OSC 7 to set username, hostname, and path.");
+DEFINE_BOOL(trackingRunloopForLiveResize, YES, @"Experimental Features: Use a tracking runloop for live resizing.");
+
+DEFINE_BOOL(enableAPIServer, NO, @"Experimental Features: Enable websocket API server.\nYou must restart iTerm2 for this change to take effect.");
+DEFINE_BOOL(useGCDUpdateTimer, YES, @"Experimental Features: Use GCD-based update timer instead of NSTimer.\nThis should cause more regular screen updates. Restart iTerm2 after changing this setting.");
+DEFINE_BOOL(drawOutlineAroundCursor, NO, @"Experimental Features: Draw outline around underline and vertical bar cursors using background color.");
+DEFINE_BOOL(killSessionsOnLogout, NO, @"Experimental Features: Kill sessions on logout.\nA possible fix for issue 4147.");
 
 @end

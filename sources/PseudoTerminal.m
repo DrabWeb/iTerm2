@@ -1,4 +1,6 @@
 #import "PseudoTerminal.h"
+#import "PseudoTerminal+Private.h"
+#import "PseudoTerminal+TouchBar.h"
 
 #import "CapturedOutput.h"
 #import "CaptureTrigger.h"
@@ -91,17 +93,9 @@
 
 NSString *const kCurrentSessionDidChange = @"kCurrentSessionDidChange";
 NSString *const kTerminalWindowControllerWasCreatedNotification = @"kTerminalWindowControllerWasCreatedNotification";
+NSString *const iTermDidDecodeWindowRestorableStateNotification = @"iTermDidDecodeWindowRestorableStateNotification";
 
 static NSString *const kWindowNameFormat = @"iTerm Window %d";
-static NSString *const iTermTouchBarIdentifierAddMark = @"iTermTouchBarIdentifierAddMark";
-static NSString *const iTermTouchBarIdentifierNextMark = @"iTermTouchBarIdentifierNextMark";
-static NSString *const iTermTouchBarIdentifierPreviousMark = @"iTermTouchBarIdentifierPreviousMark";
-static NSString *const iTermTouchBarIdentifierManPage = @"iTermTouchBarIdentifierManPage";
-static NSString *const iTermTouchBarIdentifierColorPreset = @"iTermTouchBarIdentifierColorPreset";
-static NSString *const iTermTouchBarIdentifierColorPresetScrollview = @"iTermTouchBarIdentifierColorPresetScrollview";
-static NSString *const iTermTouchBarIdentifierAutocomplete = @"iTermTouchBarIdentifierAutocomplete";
-static NSString *const iTermTabBarTouchBarIdentifier = @"tab bar";
-static NSString *const iTermTabBarItemTouchBarIdentifier = @"tab bar item";
 
 #define PtyLog DLog
 
@@ -147,7 +141,6 @@ static NSRect iTermRectCenteredVerticallyWithinRect(NSRect frameToCenter, NSRect
     return frameToCenter;
 }
 
-
 @interface NSWindow (private)
 - (void)setBottomCornerRounded:(BOOL)rounded;
 @end
@@ -158,10 +151,7 @@ static NSRect iTermRectCenteredVerticallyWithinRect(NSRect frameToCenter, NSRect
     PTYTabDelegate,
     iTermRootTerminalViewDelegate,
     iTermToolbeltViewDelegate,
-    NSCandidateListTouchBarItemDelegate,
-    NSScrubberDelegate,
-    NSScrubberDataSource,
-    NSTouchBarDelegate>
+    NSComboBoxDelegate>
 
 @property(nonatomic, assign) BOOL windowInitialized;
 
@@ -179,9 +169,6 @@ static NSRect iTermRectCenteredVerticallyWithinRect(NSRect frameToCenter, NSRect
 @implementation PseudoTerminal {
     NSPoint preferredOrigin_;
 
-    // This is a reference to the window's content view, here for convenience because it has
-    // the right type.
-    __unsafe_unretained iTermRootTerminalView *_contentView;
 
     ////////////////////////////////////////////////////////////////////////////
     // Parameter Panel
@@ -298,9 +285,9 @@ static NSRect iTermRectCenteredVerticallyWithinRect(NSRect frameToCenter, NSRect
     IBOutlet NSPanel *coprocesssPanel_;
     IBOutlet NSButton *coprocessOkButton_;
     IBOutlet NSComboBox *coprocessCommand_;
+    IBOutlet NSButton *coprocessIgnoreErrors_;
 
     NSDictionary *lastArrangement_;
-    BOOL wellFormed_;
 
     BOOL exitingLionFullscreen_;
 
@@ -367,9 +354,13 @@ static NSRect iTermRectCenteredVerticallyWithinRect(NSRect frameToCenter, NSRect
 
     // Number of tabs since last change.
     NSInteger _previousNumberOfTabs;
+    
+    // The window restoration completion block was called but windowDidDecodeRestorableState:
+    // has not yet been called.
+    BOOL _expectingDecodeOfRestorableState;
 
-    NSCustomTouchBarItem *_tabsTouchBarItem;
-    NSCandidateListTouchBarItem<NSString *> *_autocompleteCandidateListItem;
+    // Used to prevent infinite re-entrancy in windowDidChangeScreen:.
+    BOOL _inWindowDidChangeScreen;
 }
 
 + (void)registerSessionsInArrangement:(NSDictionary *)arrangement {
@@ -709,6 +700,10 @@ static NSRect iTermRectCenteredVerticallyWithinRect(NSRect frameToCenter, NSRect
                                              selector:@selector(keyBindingsDidChange:)
                                                  name:kKeyBindingsChangedNotification
                                                object:nil];
+    [[[NSWorkspace sharedWorkspace] notificationCenter] addObserver:self
+                                                           selector:@selector(activeSpaceDidChange:)
+                                                               name:NSWorkspaceActiveSpaceDidChangeNotification
+                                                             object:nil];
     PtyLog(@"set window inited");
     self.windowInitialized = YES;
     useTransparency_ = YES;
@@ -720,7 +715,7 @@ static NSRect iTermRectCenteredVerticallyWithinRect(NSRect frameToCenter, NSRect
     // Update the collection behavior.
     self.hotkeyWindowType = hotkeyWindowType;
 
-    wellFormed_ = YES;
+    _wellFormed = YES;
     [[self window] setRestorable:YES];
     [[self window] setRestorationClass:[PseudoTerminalRestorer class]];
     self.terminalGuid = [NSString stringWithFormat:@"pty-%@", [NSString uuid]];
@@ -791,10 +786,11 @@ ITERM_WEAKLY_REFERENCEABLE
 
     [self closeInstantReplayWindow];
     doNotSetRestorableState_ = YES;
-    wellFormed_ = NO;
+    _wellFormed = NO;
 
     // Do not assume that [self window] is valid here. It may have been freed.
     [[NSNotificationCenter defaultCenter] removeObserver:self];
+    [[[NSWorkspace sharedWorkspace] notificationCenter] removeObserver:self];
 
     // Release all our sessions
     NSTabViewItem *aTabViewItem;
@@ -828,6 +824,8 @@ ITERM_WEAKLY_REFERENCEABLE
 #endif
     [_didEnterLionFullscreen release];
     [_desiredTitle release];
+    [_tabsTouchBarItem release];
+    [_autocompleteCandidateListItem release];
     [super dealloc];
 }
 
@@ -1237,12 +1235,13 @@ ITERM_WEAKLY_REFERENCEABLE
     }
     // The PseudoTerminal might close while the dialog is open so keep it around for now.
     [[self retain] autorelease];
-    return NSRunAlertPanel([NSString stringWithFormat:@"Close %@?", genericName],
-                           @"%@",
-                           @"OK",
-                           @"Cancel",
-                           nil,
-                           message) == NSAlertDefaultReturn;
+
+    NSAlert *alert = [[[NSAlert alloc] init] autorelease];
+    alert.messageText = [NSString stringWithFormat:@"Close %@?", genericName];
+    alert.informativeText = message;
+    [alert addButtonWithTitle:@"OK"];
+    [alert addButtonWithTitle:@"Cancel"];
+    return ([alert runModal] == NSAlertFirstButtonReturn);
 }
 
 - (BOOL)confirmCloseTab:(PTYTab *)aTab suppressConfirmation:(BOOL)suppressConfirmation {
@@ -1323,6 +1322,45 @@ ITERM_WEAKLY_REFERENCEABLE
 
 - (void)closeTab:(PTYTab *)aTab {
     [self closeTab:aTab soft:NO];
+}
+
+- (iTermRestorableSession *)restorableSessionForSession:(PTYSession *)session {
+    if (session.isTmuxClient) {
+        return nil;
+    }
+    if ([[[self tabForSession:session] sessions] count] > 1) {
+        return [session restorableSession];
+    }
+    if (self.numberOfTabs > 1) {
+        return [self restorableSessionForTab:[self tabForSession:session]];
+    }
+    iTermRestorableSession *restorableSession = [[[iTermRestorableSession alloc] init] autorelease];
+    restorableSession.sessions = [self allSessions];
+    restorableSession.terminalGuid = self.terminalGuid;
+    restorableSession.arrangement = [self arrangement];
+    restorableSession.group = kiTermRestorableSessionGroupWindow;
+    return restorableSession;
+}
+
+- (iTermRestorableSession *)restorableSessionForTab:(PTYTab *)aTab {
+    if (!aTab) {
+        return nil;
+    }
+
+    iTermRestorableSession *restorableSession = [[[iTermRestorableSession alloc] init] autorelease];
+    restorableSession.sessions = [aTab sessions];
+    restorableSession.terminalGuid = self.terminalGuid;
+    restorableSession.tabUniqueId = aTab.uniqueId;
+    NSArray *tabs = [self tabs];
+    NSUInteger index = [tabs indexOfObject:aTab];
+    NSMutableArray *predecessors = [NSMutableArray array];
+    for (NSUInteger i = 0; i < index; i++) {
+        [predecessors addObject:@([tabs[i] uniqueId])];
+    }
+    restorableSession.predecessors = predecessors;
+    restorableSession.arrangement = [aTab arrangement];
+    restorableSession.group = kiTermRestorableSessionGroupTab;
+    return restorableSession;
 }
 
 // Just like closeTab but skips the tmux code. Terminates sessions, removes the
@@ -1428,6 +1466,14 @@ ITERM_WEAKLY_REFERENCEABLE
     }
 }
 
+- (void)activeSpaceDidChange:(NSNotification *)notification {
+    DLog(@"Active space did change. active=%@ self.window.isOnActiveSpace=%@", @(NSApp.isActive), @(self.window.isOnActiveSpace));
+    if ([(iTermApplication *)NSApp isUIElement] && !NSApp.isActive && self.lionFullScreen && self.window.isOnActiveSpace) {
+        DLog(@"Activating app because lion full screen window is on active space. %@", self);
+        [NSApp activateIgnoringOtherApps:YES];
+    }
+}
+
 - (void)keyBindingsDidChange:(NSNotification *)notification {
     [self updateTouchBarIfNeeded];
 }
@@ -1487,12 +1533,12 @@ ITERM_WEAKLY_REFERENCEABLE
 - (void)restartSessionWithConfirmation:(PTYSession *)aSession {
     assert(aSession.isRestartable);
     [[self retain] autorelease];
-    NSAlert *alert = [NSAlert alertWithMessageText:@"Restart session?"
-                                     defaultButton:@"OK"
-                                   alternateButton:@"Cancel"
-                                       otherButton:nil
-                         informativeTextWithFormat:@"Running jobs will be killed."];
-    if (aSession.exited || [alert runModal] == NSAlertDefaultReturn) {
+    NSAlert *alert = [[[NSAlert alloc] init] autorelease];
+    alert.messageText = @"Restart session?";
+    alert.informativeText = @"Running jobs will be killed.";
+    [alert addButtonWithTitle:@"OK"];
+    [alert addButtonWithTitle:@"Cancel"];
+    if (aSession.exited || [alert runModal] == NSAlertFirstButtonReturn) {
         [aSession restartSession];
     }
 }
@@ -1583,7 +1629,9 @@ ITERM_WEAKLY_REFERENCEABLE
 #endif
         title = [NSString stringWithFormat:@"%@%@%@", windowNumber, title, tmuxId];
     }
-
+    if ((self.numberOfTabs == 1) && (self.tabs.firstObject.state & kPTYTabBellState) && !self.tabBarShouldBeVisible) {
+        title = [title stringByAppendingString:@" 🔔"];
+    }
     if (liveResize_) {
         // During a live resize this has to be done immediately because the runloop doesn't get
         // around to delayed performs until the live resize is done (bug 2812).
@@ -1966,7 +2014,9 @@ ITERM_WEAKLY_REFERENCEABLE
     iTermProfileHotKey *profileHotKey = [[iTermHotKeyController sharedInstance] profileHotKeyForGUID:guid];
     iTermHotkeyWindowType hotkeyWindowType = iTermHotkeyWindowTypeNone;
     if (isHotkeyWindow) {
-        assert(profileHotKey);
+        if (!profileHotKey) {
+            return nil;
+        }
         hotkeyWindowType = profileHotKey.hotkeyWindowType;
     }
     if (windowType == WINDOW_TYPE_TRADITIONAL_FULL_SCREEN) {
@@ -2035,11 +2085,8 @@ ITERM_WEAKLY_REFERENCEABLE
         [term hideAfterOpening];
     }
     if (isHotkeyWindow) {
-        BOOL ok = YES;
-        if (force) {
-            ok = [[iTermHotKeyController sharedInstance] addRevivedHotkeyWindowController:term
-                                                                       forProfileWithGUID:guid];
-        }
+        BOOL ok = [[iTermHotKeyController sharedInstance] addRevivedHotkeyWindowController:term
+                                                                        forProfileWithGUID:guid];
         if (ok) {
             term.window.alphaValue = 0;
             [[term window] orderOut:nil];
@@ -2072,8 +2119,7 @@ ITERM_WEAKLY_REFERENCEABLE
     FindViewController *findViewController = [[[self currentSession] view] findViewController];
     NSString *regex = [iTermAdvancedSettingsModel findUrlsRegex];
     [findViewController closeViewAndDoTemporarySearchForString:regex
-                                                  ignoringCase:NO
-                                                         regex:YES];
+                                                          mode:iTermFindModeCaseSensitiveRegex];
 }
 
 - (IBAction)detachTmux:(id)sender
@@ -2171,6 +2217,17 @@ ITERM_WEAKLY_REFERENCEABLE
                                             afterDelay:0];
 }
 
++ (NSDictionary *)repairedArrangement:(NSDictionary *)arrangement replacingProfileWithGUID:(NSString *)badGuid withProfile:(Profile *)goodProfile {
+    NSMutableDictionary *mutableArrangement = [[arrangement mutableCopy] autorelease];
+    NSMutableArray *mutableTabs = [NSMutableArray array];
+
+    for (NSDictionary* tabArrangement in [arrangement objectForKey:TERMINAL_ARRANGEMENT_TABS]) {
+        [mutableTabs addObject:[PTYTab repairedArrangement:tabArrangement replacingProfileWithGUID:badGuid withProfile:(Profile *)goodProfile]];
+    }
+    mutableArrangement[TERMINAL_ARRANGEMENT_TABS] = mutableTabs;
+    return mutableArrangement;
+}
+
 - (BOOL)loadArrangement:(NSDictionary *)arrangement {
     return [self loadArrangement:arrangement sessions:nil];
 }
@@ -2197,18 +2254,8 @@ ITERM_WEAKLY_REFERENCEABLE
         [[self window] setFrame:rect display:YES];
     }
 
-    for (NSDictionary* tabArrangement in [arrangement objectForKey:TERMINAL_ARRANGEMENT_TABS]) {
-        NSDictionary<NSString *, PTYSession *> *sessionMap = nil;
-        if (sessions) {
-            sessionMap = [PTYTab sessionMapWithArrangement:tabArrangement sessions:sessions];
-        }
-        if (![PTYTab openTabWithArrangement:tabArrangement
-                                 inTerminal:self
-                            hasFlexibleView:NO
-                                    viewMap:nil
-                                 sessionMap:sessionMap]) {
-            return NO;
-        }
+    if (![self restoreTabsFromArrangement:arrangement sessions:sessions]) {
+        return NO;
     }
     _contentView.shouldShowToolbelt = [arrangement[TERMINAL_ARRANGEMENT_HAS_TOOLBELT] boolValue];
     hidingToolbeltShouldResizeWindow_ = [arrangement[TERMINAL_ARRANGEMENT_HIDING_TOOLBELT_SHOULD_RESIZE_WINDOW] boolValue];
@@ -2227,9 +2274,10 @@ ITERM_WEAKLY_REFERENCEABLE
     }
 
     Profile* addressbookEntry = [[[[[self tabs] objectAtIndex:0] sessions] objectAtIndex:0] profile];
-    if ([addressbookEntry objectForKey:KEY_SPACE] &&
-        [[addressbookEntry objectForKey:KEY_SPACE] intValue] == iTermProfileJoinsAllSpaces) {
+    if ([addressbookEntry[KEY_SPACE] intValue] == iTermProfileJoinsAllSpaces) {
         [[self window] setCollectionBehavior:[[self window] collectionBehavior] | NSWindowCollectionBehaviorCanJoinAllSpaces];
+    } else if ([addressbookEntry[KEY_SPACE] intValue] == iTermProfileOpenInCurrentSpace) {
+        _openInCurrentSpace = YES;
     }
     if ([arrangement objectForKey:TERMINAL_GUID] &&
         [[arrangement objectForKey:TERMINAL_GUID] isKindOfClass:[NSString class]]) {
@@ -2241,7 +2289,39 @@ ITERM_WEAKLY_REFERENCEABLE
     return YES;
 }
 
+- (BOOL)restoreTabsFromArrangement:(NSDictionary *)arrangement sessions:(NSArray<PTYSession *> *)sessions {
+    for (NSDictionary *tabArrangement in arrangement[TERMINAL_ARRANGEMENT_TABS]) {
+        NSDictionary<NSString *, PTYSession *> *sessionMap = nil;
+        if (sessions) {
+            sessionMap = [PTYTab sessionMapWithArrangement:tabArrangement sessions:sessions];
+        }
+        if (![PTYTab openTabWithArrangement:tabArrangement
+                                 inTerminal:self
+                            hasFlexibleView:NO
+                                    viewMap:nil
+                                 sessionMap:sessionMap]) {
+            return NO;
+        }
+    }
+    return YES;
+}
+
 - (NSDictionary *)arrangementExcludingTmuxTabs:(BOOL)excludeTmux
+                             includingContents:(BOOL)includeContents {
+    NSArray<PTYTab *> *tabs = [self.tabs filteredArrayUsingBlock:^BOOL(PTYTab *theTab) {
+        if (theTab.sessions.count == 0) {
+            return NO;
+        }
+        if (excludeTmux && theTab.isTmuxTab) {
+            return NO;
+        }
+        return YES;
+    }];
+
+    return [self arrangementWithTabs:tabs includingContents:includeContents];
+}
+
+- (NSDictionary *)arrangementWithTabs:(NSArray<PTYTab *> *)tabs
                              includingContents:(BOOL)includeContents {
     NSMutableDictionary* result = [NSMutableDictionary dictionaryWithCapacity:7];
     NSRect rect = [[self window] frame];
@@ -2279,19 +2359,12 @@ ITERM_WEAKLY_REFERENCEABLE
     result[TERMINAL_ARRANGEMENT_DESIRED_COLUMNS] = @(desiredColumns_);
 
     // Save tabs.
-    NSMutableArray* tabs = [NSMutableArray arrayWithCapacity:[self numberOfTabs]];
-    for (NSTabViewItem* tabViewItem in [_contentView.tabView tabViewItems]) {
-        PTYTab *theTab = [tabViewItem identifier];
-        if ([[theTab sessions] count]) {
-            if (!excludeTmux || ![theTab isTmuxTab]) {
-                [tabs addObject:[theTab arrangementWithContents:includeContents]];
-            }
-        }
-    }
     if ([tabs count] == 0) {
         return nil;
     }
-    result[TERMINAL_ARRANGEMENT_TABS] = tabs;
+    result[TERMINAL_ARRANGEMENT_TABS] = [tabs mapWithBlock:^id(PTYTab *theTab) {
+        return [theTab arrangementWithContents:includeContents];
+    }];
 
     // Save index of selected tab.
     result[TERMINAL_ARRANGEMENT_SELECTED_TAB_INDEX] = @([_contentView.tabView indexOfTabViewItem:[_contentView.tabView selectedTabViewItem]]);
@@ -2622,9 +2695,10 @@ ITERM_WEAKLY_REFERENCEABLE
 }
 
 - (void)canonicalizeWindowFrame {
-    PtyLog(@"canonicalizeWindowFrame");
+    PtyLog(@"canonicalizeWindowFrame %@\n%@", self, [NSThread callStackSymbols]);
     // It's important that this method respect the current screen if possible because
     // -windowDidChangeScreen calls it.
+
     NSScreen* screen = [[self window] screen];
     if (!screen) {
         screen = self.screen;
@@ -2670,6 +2744,14 @@ ITERM_WEAKLY_REFERENCEABLE
                 if (changedScrollBars && NSEqualSizes(self.window.frame.size, originalFrame.size)) {
                     DLog(@"Fitting tabs to window when canonicalizing fullscreen window because of scrollbar change");
                     [self fitTabsToWindow];
+                    if (!tmuxOriginatedResizeInProgress_) {
+                        // When opening a new tmux tab in a fullscreen window, it'll be initialized
+                        // with legacy scrollers (if the system is configured to use them) and then
+                        // it needs to update its size when the scrollers are forced to be inline.
+                        for (TmuxController *controller in self.uniqueTmuxControllers) {
+                            [controller setClientSize:self.tmuxCompatibleSize];
+                        }
+                    }
                 }
             }
         }
@@ -2704,8 +2786,19 @@ ITERM_WEAKLY_REFERENCEABLE
     // during sleep/wake from sleep. That is why we check that width is positive before setting the
     // window's frame.
     NSSize decorationSize = [self windowDecorationSize];
+
+    // Note: During window state restoration, this may be called before the tabs are created from
+    // the arrangement, in which case the line height and char width will be 0.
+    if (self.tabs.count == 0) {
+        DLog(@"Window has no tabs. Returning early.");
+        return self.window.frame;
+    }
     PtyLog(@"Decoration size is %@", [NSValue valueWithSize:decorationSize]);
     PtyLog(@"Line height is %f, char width is %f", (float) [[session textview] lineHeight], [[session textview] charWidth]);
+    if (session.textview.lineHeight == 0 || session.textview.charWidth == 0) {
+        DLog(@"Line height or char width is 0. Returning existing frame. session=%@", session);
+        return self.window.frame;
+    }
     BOOL edgeSpanning = YES;
     switch (windowType_) {
         case WINDOW_TYPE_TOP_PARTIAL:
@@ -3143,7 +3236,18 @@ ITERM_WEAKLY_REFERENCEABLE
     // appears to be spuriously called for nonnative fullscreen windows.
     DLog(@"windowDidChangeScreen called. This is known to happen when the screen didn't really change! screen=%@",
          self.window.screen);
-    [self canonicalizeWindowFrame];
+    if (!_inWindowDidChangeScreen) {
+        // Nicolas reported a bug where canonicalizeWindowFrame moved the window causing this to
+        // be called re-entrantly, and eventually the stack overflowed. If we insist the window should
+        // be on screen A and the OS insists it should be on screen B, we'll never agree, so just
+        // try once.
+        _inWindowDidChangeScreen = YES;
+        [self canonicalizeWindowFrame];
+        _inWindowDidChangeScreen = NO;
+    } else {
+        DLog(@"** Re-entrant call to windowDidChangeScreen:! Not canonicalizing. **");
+    }
+    DLog(@"Returning from windowDidChangeScreen:.");
 }
 
 - (void)windowDidMove:(NSNotification *)notification
@@ -3256,13 +3360,8 @@ ITERM_WEAKLY_REFERENCEABLE
 
     if (![iTermPreferences boolForKey:kPreferenceKeyHideMenuBarInFullscreen]) {
         // Menu bar can show in fullscreen...
-        if (IsMavericksOrLater()) {
-            // There is a menu bar on all screens.
-            menuBarIsVisible = YES;
-        } else if ([[NSScreen screens] objectAtIndex:0] == screen) {
-            // There is a menu bar on the first screen and this window is on the first screen.
-            menuBarIsVisible = YES;
-        }
+        // There is a menu bar on all screens.
+        menuBarIsVisible = YES;
     }
 
     return menuBarIsVisible ? frameMinusMenuBar : screenFrame;
@@ -3536,8 +3635,7 @@ ITERM_WEAKLY_REFERENCEABLE
     return _contentView.scrollbarShouldBeVisible;
 }
 
-- (void)windowWillStartLiveResize:(NSNotification *)notification
-{
+- (void)windowWillStartLiveResize:(NSNotification *)notification {
     liveResize_ = YES;
 }
 
@@ -3597,7 +3695,7 @@ ITERM_WEAKLY_REFERENCEABLE
         default:
             break;
     }
-    if (!NSEqualRects(frame, self.window.frame)) {
+    if (!NSEqualRects(frame, self.window.frame) && frame.size.width > 0 && frame.size.height > 0) {
         [[self window] setFrame:frame display:NO];
     }
 
@@ -3628,7 +3726,7 @@ ITERM_WEAKLY_REFERENCEABLE
     zooming_ = NO;
     togglingLionFullScreen_ = NO;
     lionFullScreen_ = YES;
-    [_contentView.tabBarControl updateFlashing];
+    [_contentView.tabBarControl setFlashing:YES];
     [_contentView updateToolbelt];
     // Set scrollbars appropriately
     [self updateSessionScrollbars];
@@ -4005,6 +4103,31 @@ ITERM_WEAKLY_REFERENCEABLE
         [self editSession:self.currentSession makeKey:NO];
     }
     [self updateTouchBarIfNeeded];
+
+    NSInteger darkCount = 0;
+    NSInteger lightCount = 0;
+    for (PTYSession *session in tab.sessions) {
+        if ([[session.colorMap colorForKey:kColorMapBackground] perceivedBrightness] < 0.5) {
+            darkCount++;
+        } else {
+            lightCount++;
+        }
+    }
+    if (lightCount > darkCount) {
+        // Matches bottom line color for tab bar
+        _contentView.color = [NSColor colorWithSRGBRed:170/255.0 green:167/255.0 blue:170/255.0 alpha:1];
+    } else {
+        _contentView.color = [NSColor windowBackgroundColor];
+    }
+    [self updateCurrentLocation];
+}
+
+- (void)updateCurrentLocation {
+    if ([iTermPreferences boolForKey:kPreferenceKeyEnableProxyIcon]) {
+        self.window.representedURL = self.currentSession.textViewCurrentLocation;
+    } else {
+        self.window.representedURL = nil;
+    }
 }
 
 - (void)notifyTmuxOfTabChange {
@@ -4029,8 +4152,9 @@ ITERM_WEAKLY_REFERENCEABLE
     [tmuxController saveWindowOrigins];
 }
 
-- (void)saveAffinitiesLater:(PTYTab *)theTab
-{
+- (void)saveAffinitiesLater:(PTYTab *)theTab {
+    // Avoid saving affinities during detach because the windows will be gone by the time it saves them.
+//    if ([theTab isTmuxTab] && !theTab.tmuxController.detaching) {
     if ([theTab isTmuxTab]) {
         PtyLog(@"Queueing call to saveAffinitiesLater from %@", [NSThread callStackSymbols]);
         [self performSelector:@selector(saveAffinitiesAndOriginsForController:)
@@ -4315,6 +4439,7 @@ ITERM_WEAKLY_REFERENCEABLE
 
     [self updateTabColors];
     [self _updateTabObjectCounts];
+    [self updateTouchBarIfNeeded];
 
     if (_contentView.tabView.numberOfTabViewItems == 1 &&
         _previousNumberOfTabs == 0 &&
@@ -4373,6 +4498,12 @@ ITERM_WEAKLY_REFERENCEABLE
         [item setRepresentedObject:tabViewItem];
         [rootMenu addItem:item];
     }
+
+    item = [[[NSMenuItem alloc] initWithTitle:@"Save Tab as Window Arrangement"
+                                       action:@selector(saveTabAsWindowArrangement:)
+                                keyEquivalent:@""] autorelease];
+    [item setRepresentedObject:tabViewItem];
+    [rootMenu addItem:item];
 
     if ([_contentView.tabView numberOfTabViewItems] > 1) {
         item = [[[NSMenuItem alloc] initWithTitle:@"Move to New Window"
@@ -4567,12 +4698,10 @@ ITERM_WEAKLY_REFERENCEABLE
         }
     }
     [self.window setBackgroundColor:backgroundColor];
-    if (IsYosemiteOrLater()) {
-        if (backgroundColor != nil && backgroundColor.perceivedBrightness < 0.5) {
-            self.window.appearance = [NSAppearance appearanceNamed:NSAppearanceNameVibrantDark];
-        } else {
-            self.window.appearance = nil;
-        }
+    if (backgroundColor != nil && backgroundColor.perceivedBrightness < 0.5) {
+        self.window.appearance = [NSAppearance appearanceNamed:NSAppearanceNameVibrantDark];
+    } else {
+        self.window.appearance = nil;
     }
 }
 
@@ -4624,20 +4753,16 @@ ITERM_WEAKLY_REFERENCEABLE
                                inSession:(PTYSession *)session {
     DLog(@"openPasswordManagerToAccountName:%@ inSession:%@", name, session);
     [session reveal];
-    if (self.window.sheets.count > 0) {
-        DLog(@"This window has sheets so not opening pw manager: %@", self.window.sheets);
-        DLog(@"The last sheet's view hierarchy:\n%@", [[[self.window.sheets lastObject] contentView] iterm_recursiveDescription]);
-        return;
-    }
     DLog(@"Show the password manager as a sheet");
     iTermPasswordManagerWindowController *passwordManagerWindowController =
         [[iTermPasswordManagerWindowController alloc] init];
     passwordManagerWindowController.delegate = self;
-    [[NSApplication sharedApplication] beginSheet:[passwordManagerWindowController window]
-                                   modalForWindow:self.window
-                                    modalDelegate:self
-                                   didEndSelector:@selector(genericCloseSheet:returnCode:contextInfo:)
-                                      contextInfo:passwordManagerWindowController];
+
+    [self.window beginSheet:[passwordManagerWindowController window] completionHandler:^(NSModalResponse returnCode) {
+        [[passwordManagerWindowController window] close];
+        [[passwordManagerWindowController window] release];
+    }];
+
     [passwordManagerWindowController selectAccountName:name];
 }
 
@@ -4775,7 +4900,7 @@ ITERM_WEAKLY_REFERENCEABLE
     PTYSession *newSession;
 
     // Initialize a new session
-    newSession = [[[PTYSession alloc] init] autorelease];
+    newSession = [[[PTYSession alloc] initSynthetic:YES] autorelease];
     // NSLog(@"New session for IR view is at %p", newSession);
 
     // set our preferences
@@ -4819,6 +4944,16 @@ ITERM_WEAKLY_REFERENCEABLE
                                            sub.range.coordRange.end.y - sub.range.coordRange.start.y)
                      inSession:session];
     }
+}
+
+
+- (IBAction)toggleCopyMode:(id)sender {
+    PTYSession *session = self.currentSession;
+    session.copyMode = !session.copyMode;
+}
+
+- (IBAction)copyModeShortcuts:(id)sender {
+    [[NSWorkspace sharedWorkspace] openURL:[NSURL URLWithString:@"https://iterm2.com/documentation-copymode.html"]];
 }
 
 - (void)showRangeOfLines:(NSRange)rangeOfLines inSession:(PTYSession *)oldSession {
@@ -4911,22 +5046,18 @@ ITERM_WEAKLY_REFERENCEABLE
     [[self currentSession] stopCoprocess];
 }
 
-- (IBAction)runCoprocess:(id)sender
-{
-    [NSApp beginSheet:coprocesssPanel_
-       modalForWindow:[self window]
-        modalDelegate:self
-       didEndSelector:nil
-          contextInfo:nil];
+- (IBAction)runCoprocess:(id)sender {
+    [self.window beginSheet:coprocesssPanel_ completionHandler:nil];
 
     NSArray *mru = [Coprocess mostRecentlyUsedCommands];
     [coprocessCommand_ removeAllItems];
     if (mru.count) {
         [coprocessCommand_ addItemsWithObjectValues:mru];
     }
+    [coprocessIgnoreErrors_ setState:[Coprocess shouldIgnoreErrorsFromCommand:coprocessCommand_.stringValue] ? NSOnState : NSOffState];
     [NSApp runModalForWindow:coprocesssPanel_];
 
-    [NSApp endSheet:coprocesssPanel_];
+    [self.window endSheet:coprocesssPanel_];
     [coprocesssPanel_ orderOut:self];
 }
 
@@ -4938,6 +5069,7 @@ ITERM_WEAKLY_REFERENCEABLE
             return;
         }
         [[self currentSession] launchCoprocessWithCommand:[coprocessCommand_ stringValue]];
+        [Coprocess setSilentlyIgnoreErrors:[coprocessIgnoreErrors_ state] == NSOnState fromCommand:[coprocessCommand_ stringValue]];
     }
     [NSApp stopModal];
 }
@@ -5135,7 +5267,8 @@ ITERM_WEAKLY_REFERENCEABLE
 
 - (void)recreateTab:(PTYTab *)tab
     withArrangement:(NSDictionary *)arrangement
-           sessions:(NSArray *)sessions {
+           sessions:(NSArray *)sessions
+             revive:(BOOL)revive {
     NSInteger tabIndex = [_contentView.tabView indexOfTabViewItemWithIdentifier:tab];
     if (tabIndex == NSNotFound) {
         return;
@@ -5166,13 +5299,17 @@ ITERM_WEAKLY_REFERENCEABLE
     if (!ok) {
         // Can't do it. Just add each session as its own tab.
         for (PTYSession *session in sessions) {
-            [session revive];
+            if (revive) {
+                [session revive];
+            }
             [self addRevivedSession:session];
         }
         return;
     }
-    for (PTYSession *session in sessions) {
-        assert([session revive]);
+    if (revive) {
+        for (PTYSession *session in sessions) {
+            assert([session revive]);
+        }
     }
 
     PTYSession *originalActiveSession = [tab activeSession];
@@ -5180,7 +5317,8 @@ ITERM_WEAKLY_REFERENCEABLE
                                            inTerminal:nil
                                       hasFlexibleView:NO
                                               viewMap:nil
-                                           sessionMap:theMap];
+                                           sessionMap:theMap
+                                       tmuxController:nil];
     [tab replaceWithContentsOfTab:temporaryTab];
     [tab updatePaneTitles];
     [tab setActiveSession:nil];
@@ -5207,7 +5345,8 @@ ITERM_WEAKLY_REFERENCEABLE
                                   inTerminal:self
                              hasFlexibleView:NO
                                      viewMap:nil
-                                  sessionMap:sessionMap];
+                                  sessionMap:sessionMap
+                              tmuxController:nil];
     tab.uniqueId = tabUniqueId;
     for (NSString *theKey in sessionMap) {
         PTYSession *session = sessionMap[theKey];
@@ -5294,12 +5433,12 @@ ITERM_WEAKLY_REFERENCEABLE
     }
     [self fitTabsToWindow];
 
-    if (targetSession == [[self currentTab] activeSession]) {
+    if (targetSession == [[self currentTab] activeSession] && ![iTermPreferences boolForKey:kPreferenceKeyFocusFollowsMouse]) {
         [[self currentTab] setActiveSession:newSession];
     }
     [[self currentTab] recheckBlur];
     [[self currentTab] numberOfSessionsDidChange];
-    [self setDimmingForSession:targetSession];
+    [self setDimmingForSessions];
     for (PTYSession *session in self.currentTab.sessions) {
         [session.view updateDim];
     }
@@ -5426,8 +5565,8 @@ ITERM_WEAKLY_REFERENCEABLE
         [self editSession:self.currentSession makeKey:NO];
     }
     [self updateTouchBarIfNeeded];
+    [self updateCurrentLocation];
 }
-
 
 - (void)fitWindowToTabs {
     [self fitWindowToTabsExcludingTmuxTabs:NO];
@@ -5745,15 +5884,12 @@ ITERM_WEAKLY_REFERENCEABLE
     [parameterName setStringValue:[NSString stringWithFormat:@"“%@”:", name]];
     [parameterValue setStringValue:@""];
 
-    [NSApp beginSheet:parameterPanel
-       modalForWindow:[self window]
-        modalDelegate:self
-       didEndSelector:nil
-          contextInfo:nil];
+    [self.window beginSheet:parameterPanel completionHandler:nil];
 
     [NSApp runModalForWindow:parameterPanel];
 
-    [NSApp endSheet:parameterPanel];
+    [self.window endSheet:parameterPanel];
+
     [parameterPanel orderOut:self];
 
     if (_parameterPanelCanceled) {
@@ -5784,7 +5920,7 @@ ITERM_WEAKLY_REFERENCEABLE
     return allSubstitutions;
 }
 
-- (NSArray<PTYTab *>*)tabs {
+- (NSArray<PTYTab *> *)tabs {
     int n = [_contentView.tabView numberOfTabViewItems];
     NSMutableArray<PTYTab *> *tabs = [NSMutableArray arrayWithCapacity:n];
     for (int i = 0; i < n; ++i) {
@@ -5828,7 +5964,7 @@ ITERM_WEAKLY_REFERENCEABLE
             [[self currentTab] setBroadcasting:NO];
     }
     broadcastMode_ = mode;
-        [self setDimmingForSessions];
+    [self setDimmingForSessions];
     iTermApplicationDelegate *itad = [iTermApplication.sharedApplication delegate];
     [itad updateBroadcastMenuState];
 }
@@ -6049,7 +6185,8 @@ ITERM_WEAKLY_REFERENCEABLE
     PtyLog(@"refreshTerminal - calling fitWindowToTabs");
 
     [self updateTabBarStyle];
-
+    [self updateCurrentLocation];
+    
     // If hiding of menu bar changed.
     if ([self fullScreen] && ![self lionFullScreen]) {
         if ([[self window] isKeyWindow]) {
@@ -6158,8 +6295,8 @@ ITERM_WEAKLY_REFERENCEABLE
         currentScreen = [NSScreen mainScreen];
     }
 
-    // If screens have separate spaces (only applicable in Mavericks and later) then all screens have a menu bar.
-    if (currentScreen == menubarScreen || (IsMavericksOrLater() && [NSScreen futureScreensHaveSeparateSpaces])) {
+    // If screens have separate spaces then all screens have a menu bar.
+    if (currentScreen == menubarScreen || [NSScreen screensHaveSeparateSpaces]) {
         DLog(@"set flags to auto-hide dock");
         int flags = NSApplicationPresentationAutoHideDock;
         if ([iTermPreferences boolForKey:kPreferenceKeyHideMenuBarInFullscreen]) {
@@ -6639,6 +6776,14 @@ ITERM_WEAKLY_REFERENCEABLE
     }
 }
 
+- (void)setRestoringWindow:(BOOL)restoringWindow {
+    if (_restoringWindow != restoringWindow) {
+        _restoringWindow = restoringWindow;
+        if (restoringWindow) {
+            self.restorableStateDecodePending = YES;
+        }
+    }
+}
 // Add a session to the tab view.
 - (void)insertSession:(PTYSession *)aSession atIndex:(int)anIndex
 {
@@ -6871,6 +7016,8 @@ ITERM_WEAKLY_REFERENCEABLE
                                                     horizontally:YES];
     } else if ([item action] == @selector(duplicateTab:)) {
         return ![[self currentTab] isTmuxTab];
+    } else if ([item action] == @selector(saveTabAsWindowArrangement:)) {
+        return YES;
     } else if ([item action] == @selector(zoomOnSelection:)) {
         return ![self inInstantReplay] && [[self currentSession] hasSelection];
     } else if ([item action] == @selector(showFindPanel:) ||
@@ -7004,6 +7151,18 @@ ITERM_WEAKLY_REFERENCEABLE
     }
 }
 
+- (void)saveTabAsWindowArrangement:(id)sender {
+    PTYTab *theTab = (PTYTab *)[[sender representedObject] identifier];
+    if (!theTab) {
+        theTab = [self currentTab];
+    }
+    NSDictionary *arrangement = [self arrangementWithTabs:@[ theTab ] includingContents:NO];
+    NSString *name = [WindowArrangements nameForNewArrangement];
+    if (name) {
+        [WindowArrangements setArrangement:@[ arrangement ] withName:name];
+    }
+}
+
 // These two methods are delecate because -closeTab: won't remove the tab from
 // the -tabs array immediately for tmux tabs.
 - (void)closeOtherTabs:(id)sender
@@ -7118,172 +7277,6 @@ ITERM_WEAKLY_REFERENCEABLE
     [self updateTouchBarIfNeeded];
 }
 
-- (NSTouchBar *)makeGenericTouchBar {
-    if (!IsTouchBarAvailable()) {
-        return nil;
-    }
-    NSTouchBar *touchBar = [[[NSTouchBar alloc] init] autorelease];
-    touchBar.delegate = self;
-    touchBar.defaultItemIdentifiers = @[ iTermTouchBarIdentifierManPage,
-                                         iTermTouchBarIdentifierColorPreset,
-                                         NSTouchBarItemIdentifierFlexibleSpace,
-                                         NSTouchBarItemIdentifierOtherItemsProxy,
-                                         iTermTouchBarIdentifierAddMark,
-                                         iTermTouchBarIdentifierPreviousMark,
-                                         iTermTouchBarIdentifierNextMark ];
-    return touchBar;
-}
-
-- (void)updateTouchBarIfNeeded {
-    if (IsTouchBarAvailable()) {
-        NSTouchBar *replacement = [self amendTouchBar:[self makeGenericTouchBar]];
-        if (![replacement.customizationIdentifier isEqualToString:self.touchBar.customizationIdentifier]) {
-            self.touchBar = replacement;
-        } else {
-            NSScrubber *scrubber = (NSScrubber *)_tabsTouchBarItem.view;
-            dispatch_async(dispatch_get_main_queue(), ^{
-                [scrubber reloadData];
-                [scrubber setSelectedIndex:[self.tabs indexOfObject:self.currentTab]];
-            });
-        }
-        NSArray *ids = @[ iTermTouchBarIdentifierManPage,
-                          iTermTouchBarIdentifierColorPreset,
-                          NSTouchBarItemIdentifierFlexibleSpace,
-                          iTermTouchBarIdentifierAddMark,
-                          iTermTouchBarIdentifierNextMark,
-                          iTermTouchBarIdentifierPreviousMark,
-                          iTermTouchBarIdentifierAutocomplete ];
-        ids = [ids arrayByAddingObjectsFromArray:[iTermKeyBindingMgr sortedTouchBarKeysInDictionary:[iTermKeyBindingMgr globalTouchBarMap]]];
-        self.touchBar.customizationAllowedItemIdentifiers = ids;
-    }
-}
-
-- (NSTouchBar *)amendTouchBar:(NSTouchBar *)touchBar {
-    if (!IsTouchBarAvailable()) {
-        return nil;
-    }
-    touchBar.customizationIdentifier = @"regular";
-    if (self.anyFullScreen) {
-        NSMutableArray *temp = [[touchBar.defaultItemIdentifiers mutableCopy] autorelease];
-        NSInteger index = [temp indexOfObject:NSTouchBarItemIdentifierOtherItemsProxy];
-        if (index != NSNotFound) {
-            touchBar.customizationIdentifier = @"full screen";
-            [temp insertObject:iTermTabBarTouchBarIdentifier atIndex:index];
-            touchBar.defaultItemIdentifiers = temp;
-        }
-        touchBar.customizationAllowedItemIdentifiers = [touchBar.customizationAllowedItemIdentifiers arrayByAddingObjectsFromArray:@[ iTermTabBarTouchBarIdentifier ]];
-    }
-    return touchBar;
-}
-
-- (void)currentSessionWordAtCursorDidBecome:(NSString *)word {
-    if (IsTouchBarAvailable() && [self respondsToSelector:@selector(touchBar)]) {
-        NSTouchBarItem *item = [self.touchBar itemForIdentifier:iTermTouchBarIdentifierManPage];
-        if (item) {
-            iTermTouchBarButton *button = (iTermTouchBarButton *)item.view;
-            [self updateManPageButton:button word:word];
-        }
-    }
-}
-
-- (void)updateManPageButton:(iTermTouchBarButton *)button word:(NSString *)word {
-    if (word) {
-        if (![button.title isEqualToString:word]) {
-            button.title = word;
-            button.imagePosition = NSImageLeft;
-            button.enabled = YES;
-            button.keyBindingAction = @{ @"command": [NSString stringWithFormat:@"man %@", [word stringWithEscapedShellCharacters]] };
-        }
-    } else if (button.enabled) {
-        button.title = @"";
-        button.imagePosition = NSImageOnly;
-        button.enabled = NO;
-        button.keyBindingAction = nil;
-    }
-}
-
-- (NSTouchBarItem *)colorPresetsScrollViewTouchBarItem {
-    if (!IsTouchBarAvailable()) {
-        return nil;
-    }
-    NSScrollView *scrollView = [[[NSScrollView alloc] init] autorelease];
-    NSCustomTouchBarItem *item = [[[NSCustomTouchBarItem alloc] initWithIdentifier:iTermTouchBarIdentifierColorPresetScrollview] autorelease];
-    item.view = scrollView;
-    NSView *documentView = [[NSView alloc] init];
-    documentView.translatesAutoresizingMaskIntoConstraints = NO;
-    scrollView.documentView = documentView;
-    NSButton *previous = nil;
-    for (NSDictionary *dict in @[ [iTermColorPresets builtInColorPresets] ?: @{},
-                                  [iTermColorPresets customColorPresets] ?: @{} ]) {
-        for (NSString *name in dict) {
-            iTermTouchBarButton *button;
-            NSColor *textColor = nil;
-            NSColor *backgroundColor = nil;
-            textColor = [ITAddressBookMgr decodeColor:[dict objectForKey:name][KEY_FOREGROUND_COLOR]];
-            backgroundColor = [ITAddressBookMgr decodeColor:[dict objectForKey:name][KEY_BACKGROUND_COLOR]];
-            NSDictionary *attributes = @{ NSForegroundColorAttributeName: textColor };
-            NSAttributedString *title = [[[NSAttributedString alloc] initWithString:name
-                                                                         attributes:attributes] autorelease];
-            button = [iTermTouchBarButton buttonWithTitle:@""
-                                                   target:self
-                                                       action:@selector(colorPresetTouchBarItemSelected:)];
-            [button sizeToFit];
-            button.attributedTitle = title;
-            button.bezelColor = backgroundColor;
-            button.keyBindingAction = @{ @"presetName": name };
-            [documentView addSubview:button];
-            button.translatesAutoresizingMaskIntoConstraints = NO;
-            if (previous == nil) {
-                // Constrain the first item's left to the document view's left
-                [documentView addConstraint:[NSLayoutConstraint constraintWithItem:button
-                                                                         attribute:NSLayoutAttributeLeft
-                                                                         relatedBy:NSLayoutRelationEqual
-                                                                            toItem:documentView
-                                                                         attribute:NSLayoutAttributeLeft
-                                                                        multiplier:1
-                                                                          constant:0]];
-            } else {
-                // Constrain non-first button's left to predecessor's right + 8pt
-                [documentView addConstraint:[NSLayoutConstraint constraintWithItem:button
-                                                                         attribute:NSLayoutAttributeLeft
-                                                                         relatedBy:NSLayoutRelationEqual
-                                                                            toItem:previous
-                                                                         attribute:NSLayoutAttributeRight
-                                                                        multiplier:1
-                                                                          constant:8]];
-            }
-            // Constrain top and bottom to document view's top and bottom
-            [documentView addConstraint:[NSLayoutConstraint constraintWithItem:button
-                                                                     attribute:NSLayoutAttributeTop
-                                                                     relatedBy:NSLayoutRelationEqual
-                                                                        toItem:documentView
-                                                                     attribute:NSLayoutAttributeTop
-                                                                    multiplier:1
-                                                                      constant:0]];
-            [documentView addConstraint:[NSLayoutConstraint constraintWithItem:button
-                                                                     attribute:NSLayoutAttributeBottom
-                                                                     relatedBy:NSLayoutRelationEqual
-                                                                        toItem:documentView
-                                                                     attribute:NSLayoutAttributeBottom
-                                                                    multiplier:1
-                                                                      constant:0]];
-            previous = button;
-        }
-    }
-    if (previous) {
-        // Constrain last button's right to document view's right
-        [documentView addConstraint:[NSLayoutConstraint constraintWithItem:previous
-                                                                 attribute:NSLayoutAttributeRight
-                                                                 relatedBy:NSLayoutRelationEqual
-                                                                    toItem:documentView
-                                                                 attribute:NSLayoutAttributeRight
-                                                                multiplier:1
-                                                                  constant:0]];
-    }
-    return item;
-}
-
-
 // Called when the parameter panel should close.
 - (IBAction)parameterPanelEnd:(id)sender {
     _parameterPanelCanceled = ([sender tag] == 0);
@@ -7315,7 +7308,7 @@ ITERM_WEAKLY_REFERENCEABLE
     PTYSession *aSession;
 
     // Initialize a new session
-    aSession = [[PTYSession alloc] init];
+    aSession = [[PTYSession alloc] initSynthetic:NO];
 
     [[aSession screen] setUnlimitedScrollback:[[bookmark objectForKey:KEY_UNLIMITED_SCROLLBACK] boolValue]];
     [[aSession screen] setMaxScrollbackLines:[[bookmark objectForKey:KEY_SCROLLBACK_LINES] intValue]];
@@ -7453,7 +7446,7 @@ ITERM_WEAKLY_REFERENCEABLE
     }
 
     // Initialize a new session
-    PTYSession *aSession = [[[PTYSession alloc] init] autorelease];
+    PTYSession *aSession = [[[PTYSession alloc] initSynthetic:NO] autorelease];
     [[aSession screen] setUnlimitedScrollback:[[profile objectForKey:KEY_UNLIMITED_SCROLLBACK] boolValue]];
     [[aSession screen] setMaxScrollbackLines:[[profile objectForKey:KEY_SCROLLBACK_LINES] intValue]];
 
@@ -7508,18 +7501,33 @@ ITERM_WEAKLY_REFERENCEABLE
 
     // On Lion, a window that can join all spaces can't go fullscreen.
     if ([self numberOfTabs] == 1 &&
-        profile[KEY_SPACE] &&
         [profile[KEY_SPACE] intValue] == iTermProfileJoinsAllSpaces) {
         [[self window] setCollectionBehavior:[[self window] collectionBehavior] | NSWindowCollectionBehaviorCanJoinAllSpaces];
+    } else if ([profile[KEY_SPACE] intValue] == iTermProfileOpenInCurrentSpace) {
+        _openInCurrentSpace = YES;
     }
 
     return aSession;
 }
 
-- (void)window:(NSWindow *)window didDecodeRestorableState:(NSCoder *)state
-{
-    [self loadArrangement:[state decodeObjectForKey:kTerminalWindowStateRestorationWindowArrangementKey]
+- (void)window:(NSWindow *)window didDecodeRestorableState:(NSCoder *)state {
+    NSDictionary *arrangement = [state decodeObjectForKey:kTerminalWindowStateRestorationWindowArrangementKey];
+    if ([iTermAdvancedSettingsModel logRestorableStateSize]) {
+        NSString *log = [arrangement sizeInfo];
+        [log writeToFile:[NSString stringWithFormat:@"/tmp/statesize.window-%p.txt", self] atomically:NO encoding:NSUTF8StringEncoding error:nil];
+    }
+    [self loadArrangement:arrangement
                  sessions:nil];
+    self.restorableStateDecodePending = NO;
+}
+
+- (void)setRestorableStateDecodePending:(BOOL)restorableStateDecodePending {
+    if (_restorableStateDecodePending != restorableStateDecodePending) {
+        _restorableStateDecodePending = restorableStateDecodePending;
+        if (!restorableStateDecodePending) {
+            [[NSNotificationCenter defaultCenter] postNotificationName:iTermDidDecodeWindowRestorableStateNotification object:self];
+        }
+    }
 }
 
 - (BOOL)allTabsAreTmuxTabs
@@ -7552,7 +7560,7 @@ ITERM_WEAKLY_REFERENCEABLE
         [[self ptyWindow] setRestoreState:nil];
         return;
     }
-    if (wellFormed_) {
+    if (_wellFormed) {
         [lastArrangement_ release];
         NSTimeInterval start = [NSDate timeIntervalSinceReferenceDate];
         BOOL includeContents = [iTermAdvancedSettingsModel restoreWindowContents];
@@ -7580,7 +7588,7 @@ ITERM_WEAKLY_REFERENCEABLE
     PTYSession *aSession;
 
     // Initialize a new session
-    aSession = [[[PTYSession alloc] init] autorelease];
+    aSession = [[[PTYSession alloc] initSynthetic:NO] autorelease];
     [[aSession screen] setUnlimitedScrollback:[profile[KEY_UNLIMITED_SCROLLBACK] boolValue]];
     [[aSession screen] setMaxScrollbackLines:[profile[KEY_SCROLLBACK_LINES] intValue]];
     // set our preferences
@@ -7759,6 +7767,41 @@ ITERM_WEAKLY_REFERENCEABLE
     [_contentView.tabBarControl setObjectCount:objectCount forTabWithIdentifier:tab];
 }
 
+- (void)tab:(PTYTab *)tab currentLocationDidChange:(NSURL *)location {
+    if (tab == self.currentTab) {
+        [self updateCurrentLocation];
+    }
+}
+
+- (void)tabDidChangeTmuxLayout:(PTYTab *)tab {
+    [self setWindowTitle];
+}
+
+- (void)tabRemoveTab:(PTYTab *)tab {
+    if ([_contentView.tabView numberOfTabViewItems] <= 1 && self.windowInitialized) {
+        [[self window] close];
+    } else {
+        NSTabViewItem *tabViewItem = [tab tabViewItem];
+        [_contentView.tabView removeTabViewItem:tabViewItem];
+        PtyLog(@"tabRemoveTab - calling fitWindowToTabs");
+        [self fitWindowToTabs];
+    }
+}
+
+- (void)tabKeyLabelsDidChangeForSession:(PTYSession *)session {
+    [self updateTouchBarFunctionKeyLabels];
+}
+
+- (void)tab:(PTYTab *)tab didChangeToState:(PTYTabState)newState {
+    if (self.numberOfTabs == 1) {
+        [self setWindowTitle];
+    }
+}
+
+- (void)currentSessionWordAtCursorDidBecome:(NSString *)word {
+    [self updateTouchBarWithWordAtCursor:word];
+}
+
 #pragma mark - Toolbelt
 
 - (void)toolbeltUpdateMouseCursor {
@@ -7816,214 +7859,14 @@ ITERM_WEAKLY_REFERENCEABLE
     [self.currentSession.quickLookController endPreviewPanelControl:panel];
 }
 
-#pragma mark - NSScrubberDelegate
+#pragma mark - NSCombobBoxDelegate
 
-- (void)scrubber:(NSScrubber *)scrubber didSelectItemAtIndex:(NSInteger)selectedIndex {
-    [self.tabView selectTabViewItemAtIndex:selectedIndex];
-}
-
-#pragma mark - NSScrubberDataSource
-
-- (NSInteger)numberOfItemsForScrubber:(NSScrubber *)scrubber {
-    return [_contentView.tabView numberOfTabViewItems];
-}
-
-- (NSString *)scrubberLabelAtIndex:(NSInteger)index {
-    NSArray<PTYTab *> *tabs = self.tabs;
-    return index < tabs.count ?  self.tabs[index].activeSession.name : @"";
-}
-
-- (__kindof NSScrubberItemView *)scrubber:(NSScrubber *)scrubber viewForItemAtIndex:(NSInteger)index {
-    NSScrubberTextItemView *itemView = [scrubber makeItemWithIdentifier:iTermTabBarItemTouchBarIdentifier owner:nil];
-    itemView.textField.stringValue = [self scrubberLabelAtIndex:index];
-    return itemView;
-}
-
-- (NSSize)scrubber:(NSScrubber *)scrubber layout:(NSScrubberFlowLayout *)layout sizeForItemAtIndex:(NSInteger)itemIndex {
-    NSSize size = NSMakeSize(CGFLOAT_MAX, CGFLOAT_MAX);
-
-    NSString *title = [self scrubberLabelAtIndex:itemIndex];
-    NSRect textRect = [title boundingRectWithSize:size
-                                          options:NSStringDrawingUsesLineFragmentOrigin | NSStringDrawingUsesFontLeading
-                                       attributes:@{ NSFontAttributeName: [NSFont systemFontOfSize:0]}];
-    // Apple says: "+10: NSTextField horizontal padding, no good way to retrieve this though. +6 for spacing."
-    // 8 is because the items become smaller the first time you change tabs for some mysterious reason
-    // and that leaves enough room for them. :(
-    // The 30 is also Apple's magic number.
-    return NSMakeSize(textRect.size.width + 10 + 6 + 8, 30);
-}
-
-#pragma mark - NSTouchBarDelegate
-
-- (nullable NSTouchBarItem *)touchBar:(NSTouchBar *)touchBar makeItemForIdentifier:(NSTouchBarItemIdentifier)identifier {
-    if ([identifier isEqualToString:iTermTabBarTouchBarIdentifier]) {
-        NSScrubber *scrubber;
-        if (!_tabsTouchBarItem) {
-            _tabsTouchBarItem = [[NSCustomTouchBarItem alloc] initWithIdentifier:identifier];
-            _tabsTouchBarItem.customizationLabel = @"Full Screen Tab Bar";
-
-            scrubber = [[NSScrubber alloc] initWithFrame:NSMakeRect(0, 0, 320, 30)];
-            scrubber.delegate = self;   // So we can respond to selection.
-            scrubber.dataSource = self;
-            scrubber.showsAdditionalContentIndicators = YES;
-
-            [scrubber registerClass:[NSScrubberTextItemView class] forItemIdentifier:iTermTabBarItemTouchBarIdentifier];
-
-            // Use the flow layout.
-            NSScrubberLayout *scrubberLayout = [[NSScrubberFlowLayout alloc] init];
-            scrubber.scrubberLayout = scrubberLayout;
-
-            scrubber.mode = NSScrubberModeFree;
-
-            NSScrubberSelectionStyle *outlineStyle = [NSScrubberSelectionStyle outlineOverlayStyle];
-            scrubber.selectionBackgroundStyle = outlineStyle;
-
-            _tabsTouchBarItem.view = scrubber;
-        } else {
-            scrubber = (NSScrubber *)_tabsTouchBarItem.view;
-        }
-        // Reload the scrubber after a spin of the runloop bacause it gets laid out tighter after the
-        // rest of the toolbar is created. If we reloadData now then it jumps the first time we change
-        // tabs.
-        dispatch_async(dispatch_get_main_queue(), ^{
-            [scrubber reloadData];
-            [scrubber setSelectedIndex:[self.tabs indexOfObject:self.currentTab]];
-        });
-
-
-        return _tabsTouchBarItem;
-    } else if ([identifier isEqualToString:iTermTouchBarIdentifierAutocomplete]) {
-        _autocompleteCandidateListItem = [[NSCandidateListTouchBarItem alloc] initWithIdentifier:identifier];
-        _autocompleteCandidateListItem.delegate = self;
-        _autocompleteCandidateListItem.customizationLabel = @"Autocomplete Suggestions";
-        NSAttributedString *(^commandUseToAttributedString)(NSString *commandUse,
-                                                            NSInteger index) = ^(NSString *command,
-                                                                                 NSInteger index) {
-            return [[[NSAttributedString alloc] initWithString:command ?: @""] autorelease];
-        };
-        _autocompleteCandidateListItem.attributedStringForCandidate = commandUseToAttributedString;
-        return _autocompleteCandidateListItem;
+- (void)controlTextDidChange:(NSNotification *)aNotification {
+    if ([aNotification object] == coprocessCommand_) {
+        [coprocessIgnoreErrors_ setState:[Coprocess shouldIgnoreErrorsFromCommand:coprocessCommand_.stringValue] ? NSOnState : NSOffState];
     }
-
-    NSImage *image = nil;
-    SEL selector = NULL;
-    NSString *label = nil;
-
-    if ([identifier isEqualToString:iTermTouchBarIdentifierManPage]) {
-        selector = @selector(manPageTouchBarItemSelected:);
-        label = @"Man Page";
-    } else if ([identifier isEqualToString:iTermTouchBarIdentifierAddMark]) {
-        image = [[NSImage imageNamed:@"Add Mark Touch Bar Icon"] imageWithColor:[NSColor labelColor]];
-        selector = @selector(addMarkTouchBarItemSelected:);
-        label = @"Add Mark";
-    } else if ([identifier isEqualToString:iTermTouchBarIdentifierNextMark]) {
-        image = [NSImage imageNamed:NSImageNameTouchBarGoDownTemplate];
-        selector = @selector(nextMarkTouchBarItemSelected:);
-        label = @"Next Mark";
-    } else if ([identifier isEqualToString:iTermTouchBarIdentifierPreviousMark]) {
-        image = [NSImage imageNamed:NSImageNameTouchBarGoUpTemplate];
-        selector = @selector(previousMarkTouchBarItemSelected:);
-        label = @"Previous Mark";
-    } else if ([identifier isEqualToString:iTermTouchBarIdentifierColorPreset]) {
-        image = [NSImage imageNamed:NSImageNameTouchBarColorPickerFill];
-        selector = @selector(colorPresetTouchBarItemSelected:);
-        NSPopoverTouchBarItem *item = [[[NSPopoverTouchBarItem alloc] initWithIdentifier:identifier] autorelease];
-        item.customizationLabel = @"Color Preset";
-        item.showsCloseButton = YES;
-        item.collapsedRepresentationImage = image;
-
-        NSTouchBar *secondaryTouchBar = [[NSTouchBar alloc] init];
-        secondaryTouchBar.delegate = self;
-        secondaryTouchBar.defaultItemIdentifiers = @[ iTermTouchBarIdentifierColorPresetScrollview ];
-        item.popoverTouchBar = secondaryTouchBar;
-        return item;
-    } else if ([identifier isEqualToString:iTermTouchBarIdentifierColorPresetScrollview]) {
-        return [self colorPresetsScrollViewTouchBarItem];
-    }
-
-    if (image || label) {
-        iTermTouchBarButton *button;
-        if (image) {
-            button = [iTermTouchBarButton buttonWithImage:image target:self action:selector];
-        } else {
-            button = [iTermTouchBarButton buttonWithTitle:label target:self action:selector];
-        }
-        NSCustomTouchBarItem *item = [[[NSCustomTouchBarItem alloc] initWithIdentifier:identifier] autorelease];
-        item.view = button;
-        item.customizationLabel = label;
-        if ([identifier isEqualToString:iTermTouchBarIdentifierManPage]) {
-            button.title = @"";
-            button.image = [NSImage imageNamed:@"Man Page Touch Bar Icon"];
-            button.imagePosition = NSImageOnly;
-            button.enabled = NO;
-        }
-        return item;
-    }
-    NSDictionary *map = [iTermKeyBindingMgr globalTouchBarMap];
-    NSDictionary *binding = map[identifier];
-
-    if (!binding) {
-        return nil;
-    }
-    NSCustomTouchBarItem *item = [[[NSCustomTouchBarItem alloc] initWithIdentifier:identifier] autorelease];
-    iTermTouchBarButton *button = [iTermTouchBarButton buttonWithTitle:[iTermKeyBindingMgr touchBarLabelForBinding:binding]
-                                                                target:self
-                                                                action:@selector(touchBarItemSelected:)];
-    button.keyBindingAction = binding;
-    item.view = button;
-    item.view.identifier = identifier;
-    item.customizationLabel = [iTermKeyBindingMgr formatAction:binding];
-
-    return item;
-}
-
-- (void)touchBarItemSelected:(iTermTouchBarButton *)sender {
-    NSDictionary *binding = sender.keyBindingAction;
-    [self.currentSession performKeyBindingAction:[iTermKeyBindingMgr actionForTouchBarItemBinding:binding]
-                                       parameter:[iTermKeyBindingMgr parameterForTouchBarItemBinding:binding]
-                                           event:[NSApp currentEvent]];
-}
-
-- (void)addMarkTouchBarItemSelected:(id)sender {
-    [self.currentSession screenSaveScrollPosition];
-}
-
-- (void)nextMarkTouchBarItemSelected:(id)sender {
-    [self.currentSession nextMarkOrNote];
-}
-
-- (void)previousMarkTouchBarItemSelected:(id)sender {
-    [self.currentSession previousMarkOrNote];
-}
-
-- (void)manPageTouchBarItemSelected:(iTermTouchBarButton *)sender {
-    NSString *command = sender.keyBindingAction[@"command"];
-    if (command) {
-        [[iTermController sharedInstance] launchBookmark:nil
-                                              inTerminal:nil
-                                                 withURL:nil
-                                        hotkeyWindowType:iTermHotkeyWindowTypeNone
-                                                 makeKey:YES
-                                             canActivate:YES
-                                                 command:command
-                                                   block:^PTYSession *(Profile *profile, PseudoTerminal *term) {
-                                                       profile = [profile dictionaryBySettingObject:@"" forKey:KEY_INITIAL_TEXT];
-                                                       return [term createTabWithProfile:profile withCommand:command];
-                                                   }];
-    }
-}
-
-- (void)colorPresetTouchBarItemSelected:(iTermTouchBarButton *)sender {
-    [self.currentSession setColorsFromPresetNamed:sender.keyBindingAction[@"presetName"]];
-}
-
-- (void)candidateListTouchBarItem:(NSCandidateListTouchBarItem *)anItem endSelectingCandidateAtIndex:(NSInteger)index {
-    if (index != NSNotFound) {
-        NSString *command = [anItem candidates][index];
-        NSString *prefix = self.currentSession.currentCommand;
-        if ([command hasPrefix:prefix] || prefix.length == 0) {
-            [self.currentSession insertText:[command substringFromIndex:prefix.length]];
-        }
+    if ([[self superclass] instancesRespondToSelector:_cmd]) {
+        [super controlTextDidChange:aNotification];
     }
 }
 

@@ -8,6 +8,7 @@
 #import <Foundation/Foundation.h>
 #import "TmuxGateway.h"
 #import "FutureMethods.h"
+#import "ProfileModel.h"
 
 extern NSString * const kTmuxWindowOpenerStatePendingOutput;
 
@@ -39,6 +40,8 @@ extern NSString *const kTmuxWindowOpenerWindowOptionStyleValueFullScreen;
 // Maps a window ID as a string to a dictionary of window flags (see WindowFlag constants above).
 @property (nonatomic, retain) NSDictionary *windowOptions;
 @property (nonatomic, assign) BOOL manuallyOpened;
+@property (nonatomic, copy) NSDictionary<NSNumber *, NSString *> *tabColors;
+@property (nonatomic, copy) Profile *profile;
 
 + (TmuxWindowOpener *)windowOpener;
 - (BOOL)openWindows:(BOOL)initial;

@@ -45,7 +45,9 @@
 NSString *const iTermUnicodeVersionDidChangeNotification = @"iTermUnicodeVersionDidChangeNotification";
 
 const NSTimeInterval kMinimumAntiIdlePeriod = 1.0;
-NSInteger iTermProfileJoinsAllSpaces = -1;
+const NSInteger iTermProfileJoinsAllSpaces = -1;
+const NSInteger iTermProfileOpenInCurrentSpace = 0;
+
 static NSMutableArray<NSNotification *> *sDelayedNotifications;
 
 @implementation ITAddressBookMgr {
@@ -562,8 +564,8 @@ static NSMutableArray<NSNotification *> *sDelayedNotifications;
 + (NSString *)shellLauncherCommand {
     return [NSString stringWithFormat:@"/usr/bin/login -f%@pl %@ %@ --launch_shell",
             [self hushlogin] ? @"q" : @"",
-            [NSUserName() stringWithEscapedShellCharacters],
-            [[[NSBundle mainBundle] executablePath] stringWithEscapedShellCharacters]];
+            [NSUserName() stringWithEscapedShellCharactersIncludingNewlines:YES],
+            [[[NSBundle mainBundle] executablePath] stringWithEscapedShellCharactersIncludingNewlines:YES]];
 }
 
 + (NSString*)loginShellCommandForBookmark:(Profile*)bookmark

@@ -32,6 +32,7 @@
 #import "ITAddressBookMgr.h"
 #import "iTermAdvancedSettingsModel.h"
 #import "iTermHotKeyController.h"
+#import "NSArray+iTerm.h"
 #import "NSFileManager+iTerm.h"
 #import "NSStringITerm.h"
 #import "NSURL+iTerm.h"
@@ -250,17 +251,11 @@ static iTermController *gSharedInstance;
 - (BOOL)terminalIsObscured:(id<iTermWindowController>)terminal {
     BOOL windowIsObscured = NO;
     NSWindow *window = [terminal window];
-    // occlusionState is new in 10.9.
-    if ([window respondsToSelector:@selector(occlusionState)]) {
-        NSWindowOcclusionState occlusionState = window.occlusionState;
-        // The occlusionState tells if you if you're on another space or another app's window is
-        // occluding yours, but for some reason one terminal window can occlude another without
-        // it noticing, so we compute that ourselves.
-        windowIsObscured = !(occlusionState & NSWindowOcclusionStateVisible);
-    } else {
-        // Use a very rough approximation. Users who complain should upgrade to 10.9.
-        windowIsObscured = !window.isOnActiveSpace;
-    }
+    NSWindowOcclusionState occlusionState = window.occlusionState;
+    // The occlusionState tells if you if you're on another space or another app's window is
+    // occluding yours, but for some reason one terminal window can occlude another without
+    // it noticing, so we compute that ourselves.
+    windowIsObscured = !(occlusionState & NSWindowOcclusionStateVisible);
     if (!windowIsObscured) {
         // Try to refine the guess by seeing if another terminal is covering this one.
         static const double kOcclusionThreshold = 0.4;
@@ -342,51 +337,31 @@ static iTermController *gSharedInstance;
     }
 }
 
-- (NSString *)showAlertWithText:(NSString *)prompt defaultInput:(NSString *)defaultValue {
-    NSAlert *alert = [NSAlert alertWithMessageText:prompt
-                                     defaultButton:@"OK"
-                                   alternateButton:@"Cancel"
-                                       otherButton:nil
-                         informativeTextWithFormat:@""];
-
-    NSTextField *input = [[[NSTextField alloc] initWithFrame:NSMakeRect(0, 0, 200, 24)] autorelease];
-    [input setStringValue:defaultValue];
-    [alert setAccessoryView:input];
-    [alert layout];
-    [[alert window] makeFirstResponder:input];
-    NSInteger button = [alert runModal];
-    if (button == NSAlertDefaultReturn) {
-        [input validateEditing];
-        return [[input stringValue] stringByReplacingOccurrencesOfString:@"\n" withString:@" "];
-    } else if (button == NSAlertAlternateReturn) {
-        return nil;
-    } else {
-        NSAssert1(NO, @"Invalid input dialog button %d", (int) button);
-        return nil;
+- (void)repairSavedArrangementNamed:(NSString *)savedArrangementName
+               replacingMissingGUID:(NSString *)guidToReplace
+                           withGUID:(NSString *)replacementGuid {
+    NSArray *terminalArrangements = [WindowArrangements arrangementWithName:savedArrangementName];
+    Profile *goodProfile = [[ProfileModel sharedInstance] bookmarkWithGuid:replacementGuid];
+    if (goodProfile) {
+        NSMutableArray *repairedArrangements = [NSMutableArray array];
+        for (NSDictionary *terminalArrangement in terminalArrangements) {
+            [repairedArrangements addObject:[PseudoTerminal repairedArrangement:terminalArrangement
+                                                       replacingProfileWithGUID:guidToReplace
+                                                                    withProfile:goodProfile]];
+        }
+        [WindowArrangements setArrangement:repairedArrangements withName:savedArrangementName];
     }
 }
 
 - (void)saveWindowArrangement:(BOOL)allWindows {
-    NSString *name = [self showAlertWithText:@"Name for saved window arrangement:"
-                                defaultInput:[NSString stringWithFormat:@"Arrangement %d", 1 + [WindowArrangements count]]];
+    NSString *name = [WindowArrangements nameForNewArrangement];
     if (!name) {
         return;
-    }
-    if ([WindowArrangements hasWindowArrangement:name]) {
-        if (NSRunAlertPanel(@"Replace Existing Saved Window Arrangement?",
-                            @"There is an existing saved window arrangement with this name. Would you like to replace it with the current arrangement?",
-                            @"Yes",
-                            @"No",
-                            nil) != NSAlertDefaultReturn) {
-            return;
-        }
     }
     NSMutableArray *terminalArrangements = [NSMutableArray arrayWithCapacity:[_terminalWindows count]];
     if (allWindows) {
         for (PseudoTerminal *terminal in _terminalWindows) {
-            if (![terminal isHotKeyWindow]) {
-                [terminalArrangements addObject:[terminal arrangement]];
-            }
+            [terminalArrangements addObject:[terminal arrangement]];
         }
     } else {
         PseudoTerminal *currentTerminal = [self currentTerminal];
@@ -399,6 +374,17 @@ static iTermController *gSharedInstance;
 }
 
 - (void)tryOpenArrangement:(NSDictionary *)terminalArrangement {
+    [self tryOpenArrangement:terminalArrangement asTabs:NO];
+}
+
+- (void)tryOpenArrangement:(NSDictionary *)terminalArrangement asTabs:(BOOL)asTabs {
+    if (asTabs) {
+        PseudoTerminal *term = [self currentTerminal];
+        if (term) {
+            [term restoreTabsFromArrangement:terminalArrangement sessions:nil];
+            return;
+        }
+    }
     BOOL shouldDelay = NO;
     DLog(@"Try to open arrangement %p...", terminalArrangement);
     if ([PseudoTerminal willAutoFullScreenNewWindow] &&
@@ -424,13 +410,19 @@ static iTermController *gSharedInstance;
     }
 }
 
-- (void)loadWindowArrangementWithName:(NSString *)theName {
+- (void)loadWindowArrangementWithName:(NSString *)theName asTabs:(BOOL)asTabs {
+    _savedArrangementNameBeingRestored = [[theName retain] autorelease];
     NSArray *terminalArrangements = [WindowArrangements arrangementWithName:theName];
     if (terminalArrangements) {
         for (NSDictionary *terminalArrangement in terminalArrangements) {
-            [self tryOpenArrangement:terminalArrangement];
+            [self tryOpenArrangement:terminalArrangement asTabs:asTabs];
         }
     }
+    _savedArrangementNameBeingRestored = nil;
+}
+
+- (void)loadWindowArrangementWithName:(NSString *)theName {
+    [self loadWindowArrangementWithName:theName asTabs:NO];
 }
 
 // Return all the terminals in the given screen.
@@ -888,8 +880,8 @@ static iTermController *gSharedInstance;
 }
 
 + (void)switchToSpaceInBookmark:(Profile *)aDict {
-    if ([aDict objectForKey:KEY_SPACE]) {
-        int spaceNum = [[aDict objectForKey:KEY_SPACE] intValue];
+    if (aDict[KEY_SPACE]) {
+        int spaceNum = [aDict[KEY_SPACE] intValue];
         if (spaceNum > 0 && spaceNum < 10) {
             // keycodes for digits 1-9. Send control-n to switch spaces.
             // TODO: This would get remapped by the event tap. It requires universal access to be on and
@@ -1011,14 +1003,31 @@ static iTermController *gSharedInstance;
 
         if ([urlType compare:@"ssh" options:NSCaseInsensitiveSearch] == NSOrderedSame) {
             NSMutableString *tempString = [NSMutableString stringWithString:@"ssh "];
-            if ([urlRep user]) {
-                [tempString appendFormat:@"-l %@ ", [urlRep user]];
+            NSString *username = [urlRep user];
+            if (username) {
+                NSMutableCharacterSet *legalCharacters = [NSMutableCharacterSet alphanumericCharacterSet];
+                [legalCharacters addCharactersInString:@"_-+"];
+                NSCharacterSet *illegalCharacters = [legalCharacters invertedSet];
+                NSRange range = [username rangeOfCharacterFromSet:illegalCharacters];
+                if (range.location != NSNotFound) {
+                    ELog(@"username %@ contains illegal character at position %@", username, @(range.location));
+                    return nil;
+                }
+                [tempString appendFormat:@"-l %@ ", [[urlRep user] stringWithEscapedShellCharactersIncludingNewlines:YES]];
             }
             if ([urlRep port]) {
                 [tempString appendFormat:@"-p %@ ", [urlRep port]];
             }
-            if ([urlRep host]) {
-                [tempString appendString:[urlRep host]];
+            NSString *hostname = [urlRep host];
+            if (hostname) {
+                NSCharacterSet *legalCharacters = [NSCharacterSet characterSetWithCharactersInString:@":abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-."];
+                NSCharacterSet *illegalCharacters = [legalCharacters invertedSet];
+                NSRange range = [hostname rangeOfCharacterFromSet:illegalCharacters];
+                if (range.location != NSNotFound) {
+                    ELog(@"Hostname %@ contains illegal character at position %@", hostname, @(range.location));
+                    return nil;
+                }
+                [tempString appendString:[hostname stringWithEscapedShellCharactersIncludingNewlines:YES]];
             }
             [tempDict setObject:tempString forKey:KEY_COMMAND_LINE];
             [tempDict setObject:@"Yes" forKey:KEY_CUSTOM_COMMAND];
@@ -1031,10 +1040,10 @@ static iTermController *gSharedInstance;
         } else if ([urlType compare:@"telnet" options:NSCaseInsensitiveSearch] == NSOrderedSame) {
             NSMutableString *tempString = [NSMutableString stringWithString:@"telnet "];
             if ([urlRep user]) {
-                [tempString appendFormat:@"-l %@ ", [urlRep user]];
+                [tempString appendFormat:@"-l %@ ", [[urlRep user] stringWithEscapedShellCharactersIncludingNewlines:YES]];
             }
             if ([urlRep host]) {
-                [tempString appendString:[urlRep host]];
+                [tempString appendString:[[urlRep host] stringWithEscapedShellCharactersIncludingNewlines:YES]];
                 if ([urlRep port]) [tempString appendFormat:@" %@", [urlRep port]];
             }
             [tempDict setObject:tempString forKey:KEY_COMMAND_LINE];
@@ -1079,6 +1088,10 @@ static iTermController *gSharedInstance;
         DLog(@"Add URL to profile");
         // Automatically fill in ssh command if command is exactly equal to $$ or it's a login shell.
         aDict = [self profile:aDict modifiedToOpenURL:url forObjectType:objectType];
+        if (aDict == nil) {
+            // Bogus hostname detected
+            return nil;
+        }
     }
     if (!bookmarkData) {
         DLog(@"Using profile:\n%@", aDict);
@@ -1201,12 +1214,10 @@ static iTermController *gSharedInstance;
         location = [NSString stringWithFormat:@"The error starts at byte %d of the script.",
                     (int)[range rangeValue].location];
     }
-    NSAlert *alert = [NSAlert alertWithMessageText:@"Error running script"
-                                     defaultButton:@"OK"
-                                   alternateButton:nil
-                                       otherButton:nil
-                         informativeTextWithFormat:@"Script at \"%@\" failed.\n\nThe error was: \"%@\"\n\n%@",
-                      fullPath, errorInfo[NSAppleScriptErrorMessage], location];
+    NSAlert *alert = [[[NSAlert alloc] init] autorelease];
+    alert.messageText = @"Error running script";
+    alert.informativeText = [NSString stringWithFormat:@"Script at \"%@\" failed.\n\nThe error was: \"%@\"\n\n%@",
+                             fullPath, errorInfo[NSAppleScriptErrorMessage], location];
     [alert runModal];
 }
 
@@ -1437,6 +1448,15 @@ static iTermController *gSharedInstance;
 
 - (void)workspaceWillPowerOff:(NSNotification *)notification {
     _willPowerOff = YES;
+    if ([iTermAdvancedSettingsModel killSessionsOnLogout] && [iTermAdvancedSettingsModel runJobsInServers]) {
+        [self killRestorableSessions];
+    }
+}
+
+- (NSInteger)numberOfDecodesPending {
+    return [[self.terminals filteredArrayUsingBlock:^BOOL(PseudoTerminal *anObject) {
+        return anObject.restorableStateDecodePending;
+    }] count];
 }
 
 @end

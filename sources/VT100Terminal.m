@@ -1,9 +1,12 @@
 #import "VT100Terminal.h"
 #import "DebugLogging.h"
+#import "iTermURLStore.h"
 #import "NSColor+iTerm.h"
+#import "NSData+iTerm.h"
 #import "NSDictionary+iTerm.h"
 #import "NSObject+iTerm.h"
 #import "NSStringITerm.h"
+#import "NSURL+iTerm.h"
 #import "VT100DCSParser.h"
 #import "VT100Parser.h"
 #import <apr-1/apr_base64.h>  // for xterm's base64 decoding (paste64)
@@ -45,6 +48,7 @@ NSString *const kTerminalStateReverseWraparoundModeKey = @"Reverse Wraparound Mo
 NSString *const kTerminalStateIsAnsiKey = @"Is ANSI";
 NSString *const kTerminalStateAutorepeatModeKey = @"Autorepeat Mode";
 NSString *const kTerminalStateInsertModeKey = @"Insert Mode";
+NSString *const kTerminalStateSendReceiveModeKey = @"Send/Receive Mode";
 NSString *const kTerminalStateCharsetKey = @"Charset";
 NSString *const kTerminalStateMouseModeKey = @"Mouse Mode";
 NSString *const kTerminalStateMouseFormatKey = @"Mouse Format";
@@ -62,19 +66,21 @@ NSString *const kTerminalStateColumnModeKey = @"Column Mode";
 NSString *const kTerminalStateDisableSMCUPAndRMCUPKey = @"Disable Alt Screen";
 NSString *const kTerminalStateInCommandKey = @"In Command";
 NSString *const kTerminalStateUnicodeVersionStack = @"Unicode Version Stack";
+NSString *const kTerminalStateURL = @"URL";
+NSString *const kTerminalStateURLParams = @"URL Params";
 
 @interface VT100Terminal ()
-@property(nonatomic, assign) BOOL reportFocus;
 @property(nonatomic, assign) BOOL reverseVideo;
 @property(nonatomic, assign) BOOL originMode;
 @property(nonatomic, assign) BOOL moreFix;
 @property(nonatomic, assign) BOOL isAnsi;
 @property(nonatomic, assign) BOOL autorepeatMode;
 @property(nonatomic, assign) int charset;
-@property(nonatomic, assign) BOOL bracketedPasteMode;
 @property(nonatomic, assign) BOOL allowColumnMode;
 @property(nonatomic, assign) BOOL columnMode;  // YES=132 Column, NO=80 Column
 @property(nonatomic, assign) BOOL disableSmcupRmcup;
+@property(nonatomic, retain) NSURL *url;
+@property(nonatomic, retain) NSString *urlParams;
 
 // A write-only property, at the moment. TODO: What should this do?
 @property(nonatomic, assign) BOOL strictAnsiMode;
@@ -114,10 +120,6 @@ typedef struct {
 } VT100SavedCursor;
 
 @implementation VT100Terminal {
-    // True if receiving a file in multitoken mode, or if between BeginFile and
-    // EndFile codes (which are deprecated).
-    BOOL receivingFile_;
-
     // In FinalTerm command mode (user is at the prompt typing a command).
     BOOL inCommand_;
 
@@ -134,9 +136,13 @@ typedef struct {
     // TODO: Actually use this.
     int sendModifiers_[NUM_MODIFIABLE_RESOURCES];
     NSMutableArray *_unicodeVersionStack;
+
+    // Code for the current hypertext link, or 0 if not in a hypertext link.
+    unsigned short _currentURLCode;
 }
 
 @synthesize delegate = delegate_;
+@synthesize receivingFile = receivingFile_;
 
 #define DEL  0x7f
 
@@ -234,6 +240,8 @@ static const int kMaxScreenRows = 4096;
     [_termType release];
     [_answerBackString release];
     [_unicodeVersionStack release];
+    [_url release];
+    [_urlParams release];
 
     [super dealloc];
 }
@@ -322,6 +330,7 @@ static const int kMaxScreenRows = 4096;
     self.autorepeatMode = YES;
     self.keypadMode = NO;
     self.insertMode = NO;
+    self.sendReceiveMode = NO;
     self.bracketedPasteMode = NO;
     _charset = 0;
     [self resetGraphicRendition];
@@ -335,6 +344,7 @@ static const int kMaxScreenRows = 4096;
     self.strictAnsiMode = NO;
     self.allowColumnMode = NO;
     receivingFile_ = NO;
+    _copyingToPasteboard = NO;
     _encoding = _canonicalEncoding;
     _parser.encoding = _canonicalEncoding;
     for (int i = 0; i < NUM_CHARSETS; i++) {
@@ -404,6 +414,7 @@ static const int kMaxScreenRows = 4096;
     result.underline = graphicRendition_.under;
     result.blink = graphicRendition_.blink;
     result.image = NO;
+    result.urlCode = _currentURLCode;
     return result;
 }
 
@@ -441,6 +452,7 @@ static const int kMaxScreenRows = 4096;
     result.italic = graphicRendition_.italic;
     result.underline = graphicRendition_.under;
     result.blink = graphicRendition_.blink;
+    result.urlCode = _currentURLCode;
     return result;
 }
 
@@ -918,8 +930,8 @@ static const int kMaxScreenRows = 4096;
     }
 
     // Convert the coordRange to a 0-based rect (all coords are 1-based so far) and return it.
-    return VT100GridRectMake(coordRange.start.x - 1,
-                             coordRange.start.y - 1,
+    return VT100GridRectMake(MAX(0, coordRange.start.x - 1),
+                             MAX(0, coordRange.start.y - 1),
                              coordRange.end.x - coordRange.start.x + 1,
                              coordRange.end.y - coordRange.start.y + 1);
 }
@@ -1147,6 +1159,9 @@ static const int kMaxScreenRows = 4096;
     // Reset INSERT
     self.insertMode = NO;
 
+    // Reset SRM
+    self.sendReceiveMode = NO;
+
     // Reset INVERSE
     graphicRendition_.reversed = NO;
 
@@ -1158,6 +1173,10 @@ static const int kMaxScreenRows = 4096;
 
     // Reset UNDERLINE
     graphicRendition_.under = NO;
+
+    self.url = nil;
+    self.urlParams = nil;
+    _currentURLCode = 0;
 
     // (Not supported: Reset INVISIBLE)
 
@@ -1193,7 +1212,7 @@ static const int kMaxScreenRows = 4096;
     // Handle file downloads, which come as a series of MULTITOKEN_BODY tokens.
     if (receivingFile_) {
         if (token->type == XTERMCC_MULTITOKEN_BODY) {
-            [delegate_ terminalDidReceiveBase64FileData:token.string];
+            [delegate_ terminalDidReceiveBase64FileData:token.string ?: @""];
             return;
         } else if (token->type == VT100_ASCIISTRING) {
             [delegate_ terminalDidReceiveBase64FileData:[token stringForAsciiData]];
@@ -1206,10 +1225,25 @@ static const int kMaxScreenRows = 4096;
             [delegate_ terminalFileReceiptEndedUnexpectedly];
             receivingFile_ = NO;
         }
+    } else if (_copyingToPasteboard) {
+        if (token->type == XTERMCC_MULTITOKEN_BODY) {
+            [delegate_ terminalDidReceiveBase64PasteboardString:token.string ?: @""];
+            return;
+        } else if (token->type == VT100_ASCIISTRING) {
+            [delegate_ terminalDidReceiveBase64PasteboardString:[token stringForAsciiData]];
+            return;
+        } else if (token->type == XTERMCC_MULTITOKEN_END) {
+            [delegate_ terminalDidFinishReceivingPasteboard];
+            _copyingToPasteboard = NO;
+            return;
+        } else {
+            [delegate_ terminalPasteboardReceiptEndedUnexpectedly];
+            _copyingToPasteboard = NO;
+        }
     }
     if (token->savingData &&
         token->type != VT100_SKIP &&
-        [delegate_ terminalIsAppendingToPasteboard]) {
+        [delegate_ terminalIsAppendingToPasteboard]) {  // This is the old code that echoes to the screen. Its use is discouraged.
         // We are probably copying text to the clipboard until esc]1337;EndCopy^G is received.
         if (token->type != XTERMCC_SET_KVP ||
             ![token.string hasPrefix:@"CopyToClipboard"]) {
@@ -1464,6 +1498,8 @@ static const int kMaxScreenRows = 4096;
                     case 4:
                         self.insertMode = mode;
                         break;
+                    case 12:
+                        self.sendReceiveMode = !mode;
                 }
             }
             break;
@@ -1641,9 +1677,11 @@ static const int kMaxScreenRows = 4096;
             [delegate_ terminalSetIconTitle:[token.string stringByReplacingControlCharsWithQuestionMark]];
             break;
         case XTERMCC_PASTE64: {
-            NSString *decoded = [self decodedBase64PasteCommand:token.string];
-            if (decoded) {
-                [delegate_ terminalPasteString:decoded];
+            if (token.string) {
+                NSString *decoded = [self decodedBase64PasteCommand:token.string];
+                if (decoded) {
+                    [delegate_ terminalPasteString:decoded];
+                }
             }
             break;
         }
@@ -1857,6 +1895,14 @@ static const int kMaxScreenRows = 4096;
             [self executeXtermProprietaryExtermExtension:token];
             break;
 
+        case XTERMCC_PWD_URL:
+            [self executeWorkingDirectoryURL:token];
+            break;
+
+        case XTERMCC_LINK:
+            [self executeLink:token];
+            break;
+
         case XTERMCC_SET_PALETTE:
             [self executeXtermSetPalette:token];
             break;
@@ -2058,6 +2104,43 @@ static const int kMaxScreenRows = 4096;
   return @[ key, value ];
 }
 
+- (void)executeWorkingDirectoryURL:(VT100Token *)token {
+    if ([delegate_ terminalIsTrusted]) {
+        [delegate_ terminalSetWorkingDirectoryURL:token.string];
+    }
+}
+
+- (void)executeLink:(VT100Token *)token {
+    NSInteger index = [token.string rangeOfString:@";"].location;
+    if (index == NSNotFound) {
+        return;
+    }
+    NSString *params = [token.string substringToIndex:index];
+    NSString *urlString = [token.string substringFromIndex:index + 1];
+    if (urlString.length > 2083) {
+        return;
+    }
+    self.url = urlString.length ? [NSURL URLWithUserSuppliedString:urlString] : nil;
+    if (self.url == nil) {
+        if (_currentURLCode) {
+            [delegate_ terminalWillEndLinkWithCode:_currentURLCode];
+        }
+        _currentURLCode = 0;
+        self.urlParams = nil;
+    } else {
+        self.urlParams = params;
+        unsigned short code = [[iTermURLStore sharedInstance] codeForURL:self.url withParams:params];
+        if (code) {
+            if (_currentURLCode) {
+                [delegate_ terminalWillEndLinkWithCode:_currentURLCode];
+            } else {
+                [delegate_ terminalWillStartLinkWithCode:code];
+            }
+            _currentURLCode = code;
+        }
+    }
+}
+
 - (void)executeXtermSetKvp:(VT100Token *)token {
     if (!token.string) {
         return;
@@ -2114,16 +2197,31 @@ static const int kMaxScreenRows = 4096;
             receivingFile_ = YES;
             [delegate_ terminalAppendString:[NSString stringWithLongCharacter:0x1F6AB]];
         }
+    } else if ([key isEqualToString:@"Copy"]) {
+        if ([delegate_ terminalIsTrusted]) {
+            [delegate_ terminalBeginCopyToPasteboard];
+            _copyingToPasteboard = YES;
+        }
+    } else if ([key isEqualToString:@"RequestUpload"]) {
+        if ([delegate_ terminalIsTrusted]) {
+            [delegate_ terminalRequestUpload:value];
+        }
     } else if ([key isEqualToString:@"BeginFile"]) {
-        ELog(@"Deprecated and unsupported code BeginFile received. Use File instead.");
+        XLog(@"Deprecated and unsupported code BeginFile received. Use File instead.");
     } else if ([key isEqualToString:@"EndFile"]) {
-        ELog(@"Deprecated and unsupported code EndFile received. Use File instead.");
+        XLog(@"Deprecated and unsupported code EndFile received. Use File instead.");
     } else if ([key isEqualToString:@"EndCopy"]) {
         if ([delegate_ terminalIsTrusted]) {
             [delegate_ terminalCopyBufferToPasteboard];
         }
     } else if ([key isEqualToString:@"RequestAttention"]) {
-        [delegate_ terminalRequestAttention:[value boolValue]];  // true: request, false: cancel
+        if ([value isEqualToString:@"fireworks"]) {
+            [delegate_ terminalRequestAttention:VT100AttentionRequestTypeFireworks];
+        } else if ([value boolValue]) {
+            [delegate_ terminalRequestAttention:VT100AttentionRequestTypeStartBouncingDockIcon];
+        } else {
+            [delegate_ terminalRequestAttention:VT100AttentionRequestTypeStopBouncingDockIcon];
+        }
     } else if ([key isEqualToString:@"SetBackgroundImageFile"]) {
         if ([delegate_ terminalIsTrusted]) {
             [delegate_ terminalSetBackgroundImageFile:value];
@@ -2142,10 +2240,10 @@ static const int kMaxScreenRows = 4096;
             [delegate_ terminalSendReport:[s dataUsingEncoding:NSUTF8StringEncoding]];
         }
     } else if ([key isEqualToString:@"UnicodeVersion"]) {
-        if ([value isEqualToString:@"push"]) {
-            [self pushUnicodeVersion];
-        } else if ([value isEqualToString:@"pop"]) {
-            [self popUnicodeVersion];
+        if ([value hasPrefix:@"push"]) {
+            [self pushUnicodeVersion:value];
+        } else if ([value hasPrefix:@"pop"]) {
+            [self popUnicodeVersion:value];
         } else if ([value isNumeric]) {
             [delegate_ terminalSetUnicodeVersion:[value integerValue]];
         }
@@ -2158,6 +2256,55 @@ static const int kMaxScreenRows = 4096;
             NSString *name = [part substringToIndex:equal];
             NSString *colorString = [part substringFromIndex:equal + 1];
             [delegate_ terminalSetColorNamed:name to:colorString];
+        }
+    } else if ([key isEqualToString:@"SetKeyLabel"]) {
+        NSInteger i = [value rangeOfString:@"="].location;
+        if (i != NSNotFound && i > 0 && i + 1 <= value.length) {
+            NSString *keyName = [value substringToIndex:i];
+            NSString *label = [value substringFromIndex:i + 1];
+            [delegate_ terminalSetLabel:label forKey:keyName];
+        }
+    } else if ([key isEqualToString:@"PushKeyLabels"]) {
+        [delegate_ terminalPushKeyLabels:value];
+    } else if ([key isEqualToString:@"PopKeyLabels"]) {
+        [delegate_ terminalPopKeyLabels:value];
+    } else if ([key isEqualToString:@"ReportVariable"]) {
+        if ([delegate_ terminalShouldSendReport] && [delegate_ terminalIsTrusted]) {
+            NSData *valueAsData = [value dataUsingEncoding:NSISOLatin1StringEncoding];
+            if (!valueAsData) {
+                return;
+            }
+            NSData *decodedData = [[[NSData alloc] initWithBase64EncodedData:valueAsData options:0] autorelease];
+            NSString *name = [decodedData stringWithEncoding:self.encoding];
+            NSString *encodedValue = @"";
+            if (name) {
+                NSString *variableValue = [delegate_ terminalValueOfVariableNamed:name];
+                encodedValue = [[variableValue dataUsingEncoding:self.encoding] base64EncodedStringWithOptions:0];
+            }
+            NSString *report = [NSString stringWithFormat:@"%c]1337;ReportVariable=%@%c", VT100CC_ESC, encodedValue ?: @"", VT100CC_BEL];
+            [delegate_ terminalSendReport:[report dataUsingEncoding:self.encoding]];
+        }
+    } else if ([key isEqualToString:@"Custom"]) {
+        if ([delegate_ terminalIsTrusted]) {
+            // Custom=key1=value1;key2=value2;...;keyN=valueN:payload
+            // ex:
+            // Custom=id=SenderIdentity:MessageGoesHere
+            NSInteger colon = [value rangeOfString:@":"].location;
+            if (colon != NSNotFound) {
+                NSArray<NSString *> *parts = [[value substringToIndex:colon] componentsSeparatedByString:@";"];
+                NSMutableDictionary *parameters = [NSMutableDictionary dictionary];
+                [parts enumerateObjectsUsingBlock:^(NSString * _Nonnull obj, NSUInteger idx, BOOL * _Nonnull stop) {
+                    NSInteger equals = [obj rangeOfString:@"="].location;
+                    if (equals != NSNotFound) {
+                        NSString *key = [obj substringToIndex:equals];
+                        NSString *parameterValue = [obj substringFromIndex:equals + 1];
+                        parameters[key] = parameterValue;
+                    }
+                }];
+                NSString *payload = [value substringFromIndex:colon + 1];
+                [delegate_ terminalCustomEscapeSequenceWithParameters:parameters
+                                                              payload:payload];
+            }
         }
     }
 }
@@ -2272,6 +2419,10 @@ static const int kMaxScreenRows = 4096;
     if (command.length != 1) {
         return;
     }
+    // <A>prompt<B>ls -l
+    // <C>output 1
+    // output 2<D>
+    // <A>prompt<B>
     switch ([command characterAtIndex:0]) {
         case 'A':
             // Sequence marking the start of the command prompt (FTCS_PROMPT_START)
@@ -2356,19 +2507,41 @@ static const int kMaxScreenRows = 4096;
     }
 }
 
-- (void)pushUnicodeVersion {
-    [_unicodeVersionStack addObject:@([delegate_ terminalUnicodeVersion])];
-}
-
-- (void)popUnicodeVersion {
-    if (_unicodeVersionStack.count == 0) {
-        return;
+- (NSString *)substringAfterSpaceInString:(NSString *)string {
+    NSInteger i = [string rangeOfString:@" "].location;
+    if (i == NSNotFound) {
+        return nil;
+    } else {
+        return [string substringFromIndex:i + 1];
     }
-    NSNumber *value = [_unicodeVersionStack lastObject];
-    [_unicodeVersionStack removeLastObject];
-    [delegate_ terminalSetUnicodeVersion:value.integerValue];
 }
 
+- (void)pushUnicodeVersion:(NSString *)label {
+    label = [self substringAfterSpaceInString:label];
+    [_unicodeVersionStack addObject:@[ label ?: @"", @([delegate_ terminalUnicodeVersion]) ]];
+}
+
+- (void)popUnicodeVersion:(NSString *)label {
+    label = [self substringAfterSpaceInString:label];
+    while (_unicodeVersionStack.count > 0) {
+        id entry = [[[_unicodeVersionStack lastObject] retain] autorelease];
+        [_unicodeVersionStack removeLastObject];
+
+        NSNumber *value = nil;
+        NSString *entryLabel = nil;
+        if ([entry isKindOfClass:[NSNumber class]]) {
+            // A restored value might have just a number. New values are always an array.
+            value = entry;
+        } else {
+            entryLabel = [entry objectAtIndex:0];
+            value = [entry objectAtIndex:1];
+        }
+        if (label.length == 0 || [label isEqualToString:entryLabel]) {
+            [delegate_ terminalSetUnicodeVersion:value.integerValue];
+            return;
+        }
+    }
+}
 
 - (NSDictionary *)dictionaryForGraphicRendition:(VT100GraphicRendition)graphicRendition {
     return @{ kGraphicRenditionBoldKey: @(graphicRendition.bold),
@@ -2453,6 +2626,7 @@ static const int kMaxScreenRows = 4096;
            kTerminalStateIsAnsiKey: @(self.isAnsi),
            kTerminalStateAutorepeatModeKey: @(self.autorepeatMode),
            kTerminalStateInsertModeKey: @(self.insertMode),
+           kTerminalStateSendReceiveModeKey: @(self.sendReceiveMode),
            kTerminalStateCharsetKey: @(self.charset),
            kTerminalStateMouseModeKey: @(self.mouseMode),
            kTerminalStateMouseFormatKey: @(self.mouseFormat),
@@ -2469,7 +2643,9 @@ static const int kMaxScreenRows = 4096;
            kTerminalStateColumnModeKey: @(self.columnMode),
            kTerminalStateDisableSMCUPAndRMCUPKey: @(self.disableSmcupRmcup),
            kTerminalStateInCommandKey: @(inCommand_),
-           kTerminalStateUnicodeVersionStack: _unicodeVersionStack };
+           kTerminalStateUnicodeVersionStack: _unicodeVersionStack,
+           kTerminalStateURL: self.url ?: [NSNull null],
+           kTerminalStateURLParams: self.urlParams ?: [NSNull null] };
     return [dict dictionaryByRemovingNullValues];
 }
 
@@ -2477,7 +2653,7 @@ static const int kMaxScreenRows = 4096;
     if (!dict) {
         return;
     }
-    self.termType = dict[kTerminalStateTermTypeKey];
+    self.termType = [dict[kTerminalStateTermTypeKey] nilIfNull];
 
     self.answerBackString = dict[kTerminalStateAnswerBackStringKey];
     if ([self.answerBackString isKindOfClass:[NSNull class]]) {
@@ -2495,12 +2671,16 @@ static const int kMaxScreenRows = 4096;
     self.isAnsi = [dict[kTerminalStateIsAnsiKey] boolValue];
     self.autorepeatMode = [dict[kTerminalStateAutorepeatModeKey] boolValue];
     self.insertMode = [dict[kTerminalStateInsertModeKey] boolValue];
+    self.sendReceiveMode = [dict[kTerminalStateSendReceiveModeKey] boolValue];
     self.charset = [dict[kTerminalStateCharsetKey] intValue];
     self.mouseMode = [dict[kTerminalStateMouseModeKey] intValue];
     self.mouseFormat = [dict[kTerminalStateMouseFormatKey] intValue];
     self.cursorMode = [dict[kTerminalStateCursorModeKey] boolValue];
     self.keypadMode = [dict[kTerminalStateKeypadModeKey] boolValue];
     self.allowKeypadMode = [dict[kTerminalStateAllowKeypadModeKey] boolValue];
+    self.url = [dict[kTerminalStateURL] nilIfNull];
+    self.urlParams = [dict[kTerminalStateURLParams] nilIfNull];
+
     self.bracketedPasteMode = [dict[kTerminalStateBracketedPasteModeKey] boolValue];
     ansiMode_ = [dict[kTerminalStateAnsiModeKey] boolValue];
     numLock_ = [dict[kTerminalStateNumLockKey] boolValue];

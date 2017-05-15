@@ -1,8 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<document type="com.apple.InterfaceBuilder3.Cocoa.XIB" version="3.0" toolsVersion="11201" systemVersion="16A320" targetRuntime="MacOSX.Cocoa" propertyAccessControl="none">
+<document type="com.apple.InterfaceBuilder3.Cocoa.XIB" version="3.0" toolsVersion="11762" systemVersion="16E195" targetRuntime="MacOSX.Cocoa" propertyAccessControl="none">
     <dependencies>
-        <deployment identifier="macosx"/>
-        <plugIn identifier="com.apple.InterfaceBuilder.CocoaPlugin" version="11201"/>
+        <plugIn identifier="com.apple.InterfaceBuilder.CocoaPlugin" version="11762"/>
     </dependencies>
     <objects>
         <customObject id="-2" userLabel="File's Owner" customClass="NSApplication">
@@ -334,6 +333,11 @@ DQ
                                     <action selector="copyWithStyles:" target="-1" id="B2X-kC-nrq"/>
                                 </connections>
                             </menuItem>
+                            <menuItem title="Copy Mode" keyEquivalent="C" id="CQc-0U-rfn">
+                                <connections>
+                                    <action selector="toggleCopyMode:" target="-1" id="nrd-WW-ADX"/>
+                                </connections>
+                            </menuItem>
                             <menuItem title="Paste" keyEquivalent="v" id="213">
                                 <connections>
                                     <action selector="paste:" target="-1" id="215"/>
@@ -393,10 +397,22 @@ DQ
                                             </connections>
                                         </menuItem>
                                         <menuItem isSeparatorItem="YES" id="htR-tW-t3s"/>
-                                        <menuItem title="Warn before Multi-Line Paste" tag="2" id="IH2-H8-9Ao">
+                                        <menuItem title="Warn Before Multi-Line Paste" id="IH2-H8-9Ao">
                                             <modifierMask key="keyEquivalentModifierMask"/>
                                             <connections>
                                                 <action selector="toggleMultiLinePasteWarning:" target="201" id="BeA-rG-dNT"/>
+                                            </connections>
+                                        </menuItem>
+                                        <menuItem title="Limit Multi-Line Paste Warning to Shell Prompt" tag="1" id="L16-T3-OVz">
+                                            <modifierMask key="keyEquivalentModifierMask"/>
+                                            <connections>
+                                                <action selector="toggleMultiLinePasteWarning:" target="201" id="hP8-62-8Sv"/>
+                                            </connections>
+                                        </menuItem>
+                                        <menuItem title="Warn Before Pasting One Line Ending in a Newline at Shell Prompt" tag="2" id="YHP-Qx-eCZ">
+                                            <modifierMask key="keyEquivalentModifierMask"/>
+                                            <connections>
+                                                <action selector="toggleMultiLinePasteWarning:" target="201" id="FcI-Al-Hhz"/>
                                             </connections>
                                         </menuItem>
                                     </items>
@@ -778,7 +794,6 @@ DQ
                             <menuItem isSeparatorItem="YES" id="Sq7-yQ-kOu">
                                 <modifierMask key="keyEquivalentModifierMask" command="YES"/>
                             </menuItem>
-                            <menuItem isSeparatorItem="YES" id="vXn-Fa-KDE"/>
                             <menuItem title="Log" id="227">
                                 <menu key="submenu" title="Log" autoenablesItems="NO" id="228">
                                     <items>
@@ -794,6 +809,15 @@ DQ
                                         </menuItem>
                                     </items>
                                 </menu>
+                            </menuItem>
+                            <menuItem isSeparatorItem="YES" id="vXn-Fa-KDE"/>
+                            <menuItem title="Bury Session" keyEquivalent="b" id="m8k-FC-JBb">
+                                <connections>
+                                    <action selector="bury:" target="-1" id="jki-EJ-MEs"/>
+                                </connections>
+                            </menuItem>
+                            <menuItem title="Buried Sessions" id="Weo-nd-iLL">
+                                <menu key="submenu" title="Buried Sessions" autoenablesItems="NO" id="PTu-aD-qbz"/>
                             </menuItem>
                         </items>
                     </menu>
@@ -887,6 +911,10 @@ DQ
                             <menuItem title="Restore Window Arrangement" id="1280">
                                 <modifierMask key="keyEquivalentModifierMask"/>
                                 <menu key="submenu" title="Restore Window Arrangement" id="1281"/>
+                            </menuItem>
+                            <menuItem title="Restore Window Arrangement as Tabs" id="z6V-EJ-Ntf" userLabel="Restore Window Arrangement as Tabs">
+                                <modifierMask key="keyEquivalentModifierMask"/>
+                                <menu key="submenu" title="Restore Window Arrangement as Tabs" id="fEX-7N-c8a"/>
                             </menuItem>
                             <menuItem isSeparatorItem="YES" id="1204">
                                 <modifierMask key="keyEquivalentModifierMask" command="YES"/>
@@ -1064,6 +1092,12 @@ DQ
                                     <action selector="showHelp:" target="201" id="hFO-6H-VeJ"/>
                                 </connections>
                             </menuItem>
+                            <menuItem title="Copy Mode Shortcuts" id="wTB-km-9Qm">
+                                <modifierMask key="keyEquivalentModifierMask"/>
+                                <connections>
+                                    <action selector="copyModeShortcuts:" target="-1" id="fOs-EL-nnE"/>
+                                </connections>
+                            </menuItem>
                         </items>
                     </menu>
                 </menuItem>
@@ -1071,6 +1105,7 @@ DQ
         </menu>
         <customObject id="201" userLabel="iTermApplicationDelegate" customClass="iTermApplicationDelegate">
             <connections>
+                <outlet property="_buriedSessions" destination="PTu-aD-qbz" id="Fl9-Gn-jv2"/>
                 <outlet property="_showTipOfTheDay" destination="ft3-BP-igZ" id="WZt-qp-iuC"/>
                 <outlet property="bookmarkMenu" destination="592" id="874"/>
                 <outlet property="closeTab" destination="635" id="795"/>
@@ -1086,18 +1121,11 @@ DQ
                 <outlet property="showFullScreenTabs" destination="1257" id="1260"/>
                 <outlet property="toolbeltMenu" destination="1296" id="1299"/>
                 <outlet property="useTransparency" destination="1228" id="1230"/>
+                <outlet property="windowArrangementsAsTabs_" destination="z6V-EJ-Ntf" id="wse-Wc-WVw"/>
                 <outlet property="windowArrangements_" destination="1280" id="1285"/>
             </connections>
         </customObject>
         <customObject id="266" userLabel="Font Manager" customClass="NSFontManager"/>
         <customObject id="879" userLabel="SUUpdater" customClass="SUUpdater"/>
-        <menuItem title="Item" id="Zmu-o3-jVG">
-            <modifierMask key="keyEquivalentModifierMask"/>
-        </menuItem>
-        <menuItem title="Show Toolbelt" keyEquivalent="B" id="Ocw-a0-xZu">
-            <connections>
-                <action selector="toggleToolbeltVisibility:" target="-1" id="p4r-A4-cZD"/>
-            </connections>
-        </menuItem>
     </objects>
 </document>

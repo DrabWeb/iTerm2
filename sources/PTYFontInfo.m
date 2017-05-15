@@ -13,39 +13,98 @@
 @implementation NSFont(PTYFontInfo)
 
 - (NSInteger)it_ligatureLevel {
-    // Some fonts have great ligatures but unlike FiraCode you need to ask for them. FiraCode gives
-    // you ligatures whether you like it or not.
+    // Returns the proper ligature level for this font. Defaults to 1.
     static NSDictionary *fontNameToLigatureLevel;
     static dispatch_once_t onceToken;
     dispatch_once(&onceToken, ^{
-        fontNameToLigatureLevel = @{ @"PragmataPro": @1,
-                                     @"Hasklig-Black": @1,
-                                     @"Hasklig-BlackIt": @1,
-                                     @"Hasklig-Bold": @1,
-                                     @"Hasklig-BoldIt": @1,
-                                     @"Hasklig-ExtraLight": @1,
-                                     @"Hasklig-ExtraLightIt": @1,
-                                     @"Hasklig-It": @1,
-                                     @"Hasklig-Light": @1,
-                                     @"Hasklig-LightIt": @1,
-                                     @"Hasklig-Medium": @1,
-                                     @"Hasklig-MediumIt": @1,
-                                     @"Hasklig-Regular": @1,
-                                     @"Hasklig-Semibold": @1,
-                                     @"Hasklig-SemiboldIt": @1,
-                                     @"OperatorMono-XLight": @1,
-                                     @"OperatorMono-XLightItalic": @1,
-                                     @"OperatorMono-Light": @1,
-                                     @"OperatorMono-LightItalic": @1,
-                                     @"OperatorMono-Book": @1,
-                                     @"OperatorMono-BookItalic": @1,
-                                     @"OperatorMono-Medium": @1,
-                                     @"OperatorMono-MediumItalic": @1,
-                                     @"OperatorMono-Bold": @1,
-                                     @"OperatorMono-BoldItalic": @1 };
+        fontNameToLigatureLevel = @{ @"Iosevka": @2,
+                                     @"Iosevka-Bold": @2,
+                                     @"Iosevka-Bold-Italic": @2,
+                                     @"Iosevka-Bold-Oblique": @2,
+                                     @"Iosevka-Extralight": @2,
+                                     @"Iosevka-Extralight-Italic": @2,
+                                     @"Iosevka-Extralight-Oblique": @2,
+                                     @"Iosevka-Heavy": @2,
+                                     @"Iosevka-Heavy-Italic": @2,
+                                     @"Iosevka-Heavy-Oblique": @2,
+                                     @"Iosevka-Italic": @2,
+                                     @"Iosevka-Light": @2,
+                                     @"Iosevka-Light-Italic": @2,
+                                     @"Iosevka-Light-Oblique": @2,
+                                     @"Iosevka-Medium": @2,
+                                     @"Iosevka-Medium-Italic": @2,
+                                     @"Iosevka-Medium-Oblique": @2,
+                                     @"Iosevka-Oblique": @2,
+                                     @"Iosevka-Thin": @2,
+                                     @"Iosevka-Thin-Italic": @2,
+                                     @"Iosevka-Thin-Oblique": @2,
+                                     @"Iosevka-Slab": @2,
+                                     @"Iosevka-Slab-Bold": @2,
+                                     @"Iosevka-Slab-Bold-Italic": @2,
+                                     @"Iosevka-Slab-Bold-Oblique": @2,
+                                     @"Iosevka-Slab-Extralight": @2,
+                                     @"Iosevka-Slab-Extralight-Italic": @2,
+                                     @"Iosevka-Slab-Extralight-Oblique": @2,
+                                     @"Iosevka-Slab-Heavy": @2,
+                                     @"Iosevka-Slab-Heavy-Italic": @2,
+                                     @"Iosevka-Slab-Heavy-Oblique": @2,
+                                     @"Iosevka-Slab-Italic": @2,
+                                     @"Iosevka-Slab-Light": @2,
+                                     @"Iosevka-Slab-Light-Italic": @2,
+                                     @"Iosevka-Slab-Light-Oblique": @2,
+                                     @"Iosevka-Slab-Medium": @2,
+                                     @"Iosevka-Slab-Medium-Italic": @2,
+                                     @"Iosevka-Slab-Medium-Oblique": @2,
+                                     @"Iosevka-Slab-Oblique": @2,
+                                     @"Iosevka-Slab-Thin": @2,
+                                     @"Iosevka-Slab-Thin-Italic": @2,
+                                     @"Iosevka-Slab-Thin-Oblique": @2,
+                                     @"IosevkaCC": @2,
+                                     @"IosevkaCC-Bold": @2,
+                                     @"IosevkaCC-Bold-Italic": @2,
+                                     @"IosevkaCC-Bold-Oblique": @2,
+                                     @"IosevkaCC-Extralight": @2,
+                                     @"IosevkaCC-Extralight-Italic": @2,
+                                     @"IosevkaCC-Extralight-Oblique": @2,
+                                     @"IosevkaCC-Heavy": @2,
+                                     @"IosevkaCC-Heavy-Italic": @2,
+                                     @"IosevkaCC-Heavy-Oblique": @2,
+                                     @"IosevkaCC-Italic": @2,
+                                     @"IosevkaCC-Light": @2,
+                                     @"IosevkaCC-Light-Italic": @2,
+                                     @"IosevkaCC-Light-Oblique": @2,
+                                     @"IosevkaCC-Medium": @2,
+                                     @"IosevkaCC-Medium-Italic": @2,
+                                     @"IosevkaCC-Medium-Oblique": @2,
+                                     @"IosevkaCC-Oblique": @2,
+                                     @"IosevkaCC-Thin": @2,
+                                     @"IosevkaCC-Thin-Italic": @2,
+                                     @"IosevkaCC-Thin-Oblique": @2,
+                                     @"IosevkaCC-Slab": @2,
+                                     @"IosevkaCC-Slab-Bold": @2,
+                                     @"IosevkaCC-Slab-Bold-Italic": @2,
+                                     @"IosevkaCC-Slab-Bold-Oblique": @2,
+                                     @"IosevkaCC-Slab-Extralight": @2,
+                                     @"IosevkaCC-Slab-Extralight-Italic": @2,
+                                     @"IosevkaCC-Slab-Extralight-Oblique": @2,
+                                     @"IosevkaCC-Slab-Heavy": @2,
+                                     @"IosevkaCC-Slab-Heavy-Italic": @2,
+                                     @"IosevkaCC-Slab-Heavy-Oblique": @2,
+                                     @"IosevkaCC-Slab-Italic": @2,
+                                     @"IosevkaCC-Slab-Light": @2,
+                                     @"IosevkaCC-Slab-Light-Italic": @2,
+                                     @"IosevkaCC-Slab-Light-Oblique": @2,
+                                     @"IosevkaCC-Slab-Medium": @2,
+                                     @"IosevkaCC-Slab-Medium-Italic": @2,
+                                     @"IosevkaCC-Slab-Medium-Oblique": @2,
+                                     @"IosevkaCC-Slab-Oblique": @2,
+                                     @"IosevkaCC-Slab-Thin": @2,
+                                     @"IosevkaCC-Slab-Thin-Italic": @2,
+                                     @"IosevkaCC-Slab-Thin-Oblique": @2, };
         [fontNameToLigatureLevel retain];
     });
-    return [fontNameToLigatureLevel[self.fontName] integerValue];
+    NSNumber *value = fontNameToLigatureLevel[self.fontName];
+    return value ? value.integerValue : 1;
 }
 
 - (BOOL)it_defaultLigatures {
@@ -65,11 +124,9 @@
                                                             @"FuraCodeNerdFontCompleteMono---Regular",
                                                             @"FuraCodeNerdFontCompleteMono---Retina" ]] retain];
     });
-    return [fontsWithDefaultLigatures containsObject:self.fontName];
-}
-
-- (BOOL)it_supportsLigatures {
-    return self.it_defaultLigatures || self.it_ligatureLevel > 0;
+    BOOL result = [fontsWithDefaultLigatures containsObject:self.fontName];
+    DLog(@"Default ligatures for '%@' is %@", self.fontName, @(result));
+    return result;
 }
 
 @end

@@ -27,6 +27,8 @@ extern NSString *const kTerminalWindowControllerWasCreatedNotification;
 
 extern NSString *const kCurrentSessionDidChange;
 
+extern NSString *const iTermDidDecodeWindowRestorableStateNotification;
+
 // This class is 1:1 with windows. It controls the tabs, the window's fulscreen
 // status, and coordinates resizing of sessions (either session-initiated
 // or window-initiated).
@@ -74,6 +76,13 @@ extern NSString *const kCurrentSessionDidChange;
 // Are we in the process of restoring a window with NSWindowRestoration? If so, do not order
 // the window as it may be minimized (issue 5258)
 @property(nonatomic) BOOL restoringWindow;
+
+// Set to YES when the window has been created but window:didDecodeRestorableState: hasn't been
+// called yet.
+@property(nonatomic) BOOL restorableStateDecodePending;
+
+// Used only by hotkey windows. Indicate if it should move to the active space when opening.
+@property(nonatomic, readonly) BOOL openInCurrentSpace;
 
 // Draws a mock-up of a window arrangement into the current graphics context.
 // |frames| gives an array of NSValue's having NSRect values for each screen,
@@ -231,8 +240,15 @@ extern NSString *const kCurrentSessionDidChange;
 // Return the smallest allowable width for this terminal.
 - (float)minWidth;
 
++ (NSDictionary *)repairedArrangement:(NSDictionary *)arrangement
+             replacingProfileWithGUID:(NSString *)badGuid
+                          withProfile:(Profile *)goodProfile;
+
 // Load an arrangement into an empty window.
 - (BOOL)loadArrangement:(NSDictionary *)arrangement;
+
+// Load just the tabs into this window.
+- (BOOL)restoreTabsFromArrangement:(NSDictionary *)arrangement sessions:(NSArray<PTYSession *> *)sessions;
 
 // Returns the arrangement for this window.
 - (NSDictionary*)arrangement;
@@ -294,7 +310,9 @@ extern NSString *const kCurrentSessionDidChange;
                  predecessors:(NSArray *)predecessors;  // NSInteger of tab uniqueId's that come before this tab.
 - (void)recreateTab:(PTYTab *)tab
     withArrangement:(NSDictionary *)arrangement
-           sessions:(NSArray *)sessions;
+           sessions:(NSArray *)sessions
+             revive:(BOOL)revive;
+
 - (IBAction)toggleToolbeltVisibility:(id)sender;
 
 - (void)setupSession:(PTYSession *)aSession
@@ -316,6 +334,9 @@ extern NSString *const kCurrentSessionDidChange;
 - (void)swapPaneRight;
 - (void)swapPaneUp;
 - (void)swapPaneDown;
+
+// Returns a restorable session that will restore the split pane, tab, or window, as needed.
+- (iTermRestorableSession *)restorableSessionForSession:(PTYSession *)session;
 
 @end
 

@@ -67,7 +67,8 @@ int decode_utf8_char(const unsigned char * restrict datap,
 
 // Returns the number of lines in a string.
 - (NSUInteger)numberOfLines;
-- (NSString *)stringWithEscapedShellCharacters;
+- (NSString *)stringWithEscapedShellCharactersIncludingNewlines:(BOOL)includingNewlines;
+- (NSString *)stringWithEscapedShellCharactersExceptTabAndNewline;
 
 // Replaces tab with ^V + tab.
 - (NSString *)stringWithShellEscapedTabs;
@@ -251,6 +252,8 @@ int decode_utf8_char(const unsigned char * restrict datap,
 // Modify the range's endpoint to not sever a surrogate pair.
 - (NSRange)makeRangeSafe:(NSRange)range;
 
+- (NSString *)stringByMakingControlCharactersToPrintable;
+
 @end
 
 @interface NSMutableString (iTerm)
@@ -258,7 +261,8 @@ int decode_utf8_char(const unsigned char * restrict datap,
 - (void)trimTrailingWhitespace;
 
 // Puts backslashes before characters in shellEscapableCharacters.
-- (void)escapeShellCharacters;
+- (void)escapeShellCharactersIncludingNewlines:(BOOL)includingNewlines;
+- (void)escapeShellCharactersExceptTabAndNewline;
 
 // Convenience method to append a single character.
 - (void)appendCharacter:(unichar)c;

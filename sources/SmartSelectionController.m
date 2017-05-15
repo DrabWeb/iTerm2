@@ -7,6 +7,8 @@
 //
 
 #import "SmartSelectionController.h"
+
+#import "DebugLogging.h"
 #import "ProfileModel.h"
 #import "ITAddressBookMgr.h"
 #import "FutureMethods.h"
@@ -62,6 +64,7 @@ static NSString *const kLogDebugInfoKey = @"Log Smart Selection Debug Info";
         NSString* plistFile = [[NSBundle bundleForClass:[self class]] pathForResource:@"SmartSelectionRules"
                                                                                ofType:@"plist"];
         NSDictionary* rulesDict = [NSDictionary dictionaryWithContentsOfFile:plistFile];
+        ITCriticalError(rulesDict != nil, @"Failed to parse SmartSelectionRules: %@", [NSString stringWithContentsOfFile:plistFile encoding:NSUTF8StringEncoding error:nil]);
         rulesArray = [[rulesDict objectForKey:@"Rules"] retain];
     }
     return rulesArray;
@@ -290,19 +293,16 @@ static NSString *const kLogDebugInfoKey = @"Log Smart Selection Debug Info";
 
 - (IBAction)editActions:(id)sender {
     NSDictionary *rule = [self.rules objectAtIndex:[tableView_ selectedRow]];
+    if (!rule) {
+        return;
+    }
     NSArray *actions = [SmartSelectionController actionsInRule:rule];
     [contextMenuPrefsController_ setActions:actions];
     [contextMenuPrefsController_ window];
     [contextMenuPrefsController_ setDelegate:self];
-    [NSApp beginSheet:[contextMenuPrefsController_ window]
-        modalForWindow:[self window]
-        modalDelegate:self
-        didEndSelector:@selector(closeSheet:returnCode:contextInfo:)
-        contextInfo:nil];
-}
-
-- (void)closeSheet:(NSWindow *)sheet returnCode:(int)returnCode contextInfo:(void *)contextInfo {
-    [sheet close];
+    [self.window beginSheet:contextMenuPrefsController_.window completionHandler:^(NSModalResponse returnCode) {
+        [contextMenuPrefsController_.window close];
+    }];
 }
 
 - (void)windowWillOpen {
@@ -316,7 +316,7 @@ static NSString *const kLogDebugInfoKey = @"Log Smart Selection Debug Info";
     NSMutableDictionary *rule = [[[self.rules objectAtIndex:rowIndex] mutableCopy] autorelease];
     [rule setObject:newActions forKey:kActionsKey];
     [self setRule:rule forRow:rowIndex];
-    [NSApp endSheet:[contextMenuPrefsController_ window]];
+    [contextMenuPrefsController_.window.sheetParent endSheet:contextMenuPrefsController_.window];
 }
 
 @end

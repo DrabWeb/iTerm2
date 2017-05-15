@@ -20,6 +20,10 @@
 @interface iTermBoxCursor : iTermCursor
 @end
 
+@interface iTermCopyModeCursor : iTermCursor
+@property (nonatomic) BOOL selecting;
+@end
+
 @implementation iTermCursor
 
 + (iTermCursor *)cursorOfType:(ITermCursorType)theType {
@@ -38,6 +42,11 @@
     }
 }
 
++ (instancetype)copyModeCursorInSelectionState:(BOOL)selecting {
+    iTermCopyModeCursor *cursor = [[[iTermCopyModeCursor alloc] init] autorelease];
+    cursor.selecting = selecting;
+    return cursor;
+}
 
 - (void)drawWithRect:(NSRect)rect
          doubleWidth:(BOOL)doubleWidth
@@ -47,7 +56,18 @@
                smart:(BOOL)smart
              focused:(BOOL)focused
                coord:(VT100GridCoord)coord
-          cellHeight:(CGFloat)cellHeight {
+             outline:(BOOL)outline {
+}
+
+- (void)drawOutlineOfRect:(NSRect)cursorRect withColor:(NSColor *)color {
+    [[color colorWithAlphaComponent:0.75] set];
+    NSRect rect = cursorRect;
+    CGFloat frameWidth = 0.5;
+    rect.origin.x -= frameWidth;
+    rect.origin.y -= frameWidth;
+    rect.size.width += frameWidth * 2;
+    rect.size.height += frameWidth * 2;
+    NSFrameRectWithWidthUsingOperation(rect, 0.5, NSCompositeSourceOver);
 }
 
 @end
@@ -62,12 +82,18 @@
                smart:(BOOL)smart
              focused:(BOOL)focused
                coord:(VT100GridCoord)coord
-          cellHeight:(CGFloat)cellHeight {
-    [backgroundColor set];
-    NSRectFill(NSMakeRect(rect.origin.x,
-                          rect.origin.y + rect.size.height - 2,
-                          ceil(rect.size.width),
-                          2));
+             outline:(BOOL)outline {
+    const CGFloat height = 2;
+    NSRect cursorRect = NSMakeRect(rect.origin.x,
+                                   rect.origin.y + rect.size.height - height - [iTermAdvancedSettingsModel underlineCursorOffset],
+                                   ceil(rect.size.width),
+                                   height);
+    if (outline) {
+        [self drawOutlineOfRect:cursorRect withColor:backgroundColor];
+    } else {
+        [backgroundColor set];
+        NSRectFill(cursorRect);
+    }
 }
 
 @end
@@ -82,9 +108,54 @@
                smart:(BOOL)smart
              focused:(BOOL)focused
                coord:(VT100GridCoord)coord
-          cellHeight:(CGFloat)cellHeight {
-    [backgroundColor set];
-    NSRectFill(NSMakeRect(rect.origin.x, rect.origin.y, 1, rect.size.height));
+             outline:(BOOL)outline {
+    NSRect cursorRect = NSMakeRect(rect.origin.x, rect.origin.y, 1, rect.size.height);
+    if (outline) {
+        [self drawOutlineOfRect:cursorRect withColor:backgroundColor];
+    } else {
+        [backgroundColor set];
+        NSRectFill(cursorRect);
+    }
+}
+
+@end
+
+@implementation iTermCopyModeCursor
+
+- (void)drawWithRect:(NSRect)rect
+         doubleWidth:(BOOL)doubleWidth
+          screenChar:(screen_char_t)screenChar
+     backgroundColor:(NSColor *)backgroundColor
+     foregroundColor:(NSColor *)foregroundColor
+               smart:(BOOL)smart
+             focused:(BOOL)focused
+               coord:(VT100GridCoord)coord
+             outline:(BOOL)outline {
+    const CGFloat heightFraction = 1 / 3.0;
+    NSRect cursorRect = NSMakeRect(rect.origin.x - rect.size.width,
+                                   rect.origin.y,
+                                   rect.size.width * 2,
+                                   rect.size.height * heightFraction);
+
+    const CGFloat r = self.selecting ? 2 : 1;
+    NSBezierPath *path = [[[NSBezierPath alloc] init] autorelease];
+    path = [[[NSBezierPath alloc] init] autorelease];
+    [path moveToPoint:NSMakePoint(NSMinX(cursorRect), NSMinY(cursorRect))];
+    [path lineToPoint:NSMakePoint(NSMidX(cursorRect) - r, NSMaxY(cursorRect))];
+    [path lineToPoint:NSMakePoint(NSMidX(cursorRect) - r, NSMaxY(rect))];
+    [path lineToPoint:NSMakePoint(NSMidX(cursorRect) + r, NSMaxY(rect))];
+    [path lineToPoint:NSMakePoint(NSMidX(cursorRect) + r, NSMaxY(cursorRect))];
+    [path lineToPoint:NSMakePoint(NSMaxX(cursorRect), NSMinY(cursorRect))];
+    [path lineToPoint:NSMakePoint(NSMinX(cursorRect), NSMinY(cursorRect))];
+    if (self.selecting) {
+        [[NSColor colorWithRed:0xc1 / 255.0 green:0xde / 255.0 blue:0xff / 255.0 alpha:1] set];
+    } else {
+        [[NSColor whiteColor] set];
+    }
+    [path fill];
+
+    [[NSColor blackColor] set];
+    [path stroke];
 }
 
 @end
@@ -99,7 +170,9 @@
                smart:(BOOL)smart
              focused:(BOOL)focused
                coord:(VT100GridCoord)coord
-          cellHeight:(CGFloat)cellHeight {
+             outline:(BOOL)outline {
+    assert(!outline);
+
     // Draw the colored box/frame
     if (smart) {
         iTermCursorNeighbors neighbors = [self.delegate cursorNeighbors];

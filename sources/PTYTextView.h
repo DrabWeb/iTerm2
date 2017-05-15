@@ -1,4 +1,5 @@
 #import <Cocoa/Cocoa.h>
+#import "FindViewController.h"
 #import "ITAddressBookMgr.h"
 #import "iTerm.h"
 #import "iTermColorMap.h"
@@ -50,7 +51,16 @@ typedef NS_ENUM(NSInteger, PTYTextViewSelectionEndpoint) {
 
 typedef NS_ENUM(NSInteger, PTYTextViewSelectionExtensionDirection) {
     kPTYTextViewSelectionExtensionDirectionLeft,
-    kPTYTextViewSelectionExtensionDirectionRight
+    kPTYTextViewSelectionExtensionDirectionRight,
+
+    // These ignore the unit and are simple movements.
+    kPTYTextViewSelectionExtensionDirectionUp,
+    kPTYTextViewSelectionExtensionDirectionDown,
+    kPTYTextViewSelectionExtensionDirectionStartOfLine,
+    kPTYTextViewSelectionExtensionDirectionEndOfLine,
+    kPTYTextViewSelectionExtensionDirectionTop,
+    kPTYTextViewSelectionExtensionDirectionBottom,
+    kPTYTextViewSelectionExtensionDirectionStartOfIndentation,
 };
 
 typedef NS_ENUM(NSInteger, PTYTextViewSelectionExtensionUnit) {
@@ -125,6 +135,7 @@ typedef NS_ENUM(NSInteger, PTYTextViewSelectionExtensionUnit) {
 - (BOOL)textViewHasCoprocess;
 - (void)textViewPostTabContentsChangedNotification;
 - (void)textViewInvalidateRestorableState;
+- (void)textViewDidFindDirtyRects;
 - (void)textViewBeginDrag;
 - (void)textViewMovePane;
 - (void)textViewSwapPane;
@@ -147,7 +158,7 @@ typedef NS_ENUM(NSInteger, PTYTextViewSelectionExtensionUnit) {
 - (BOOL)textViewCanSelectOutputOfLastCommand;
 - (BOOL)textViewCanSelectCurrentCommand;
 - (NSColor *)textViewCursorGuideColor;
-- (BOOL)textViewUseHFSPlusMapping;
+- (iTermUnicodeNormalization)textViewUnicodeNormalizationForm;
 - (NSColor *)textViewBadgeColor;
 - (NSDictionary *)textViewVariables;
 - (BOOL)textViewSuppressingAllOutput;
@@ -170,6 +181,16 @@ typedef NS_ENUM(NSInteger, PTYTextViewSelectionExtensionUnit) {
 
 // The background color in the color map changed.
 - (void)textViewBackgroundColorDidChange;
+
+// Describes the current user, host, and path.
+- (NSURL *)textViewCurrentLocation;
+- (void)textViewBurySession;
+- (void)textViewShowHoverURL:(NSString *)url;
+
+- (BOOL)textViewCopyMode;
+- (BOOL)textViewCopyModeSelecting;
+- (VT100GridCoord)textViewCopyModeCursorCoord;
+- (void)textViewDidSelectRangeForFindOnPage:(VT100GridCoordRange)range;
 
 @end
 
@@ -301,6 +322,9 @@ typedef void (^PTYTextViewDrawingHookBlock)(iTermTextDrawingHelper *);
 // Returns the desired height of this view that exactly fits its contents.
 @property(nonatomic, readonly) CGFloat desiredHeight;
 
+// Lines that are currently visible on the screen.
+@property(nonatomic, readonly) VT100GridRange rangeOfVisibleLines;
+
 // Returns the size of a cell for a given font. hspace and vspace are multipliers and the width
 // and height.
 + (NSSize)charSizeForFont:(NSFont*)aFont
@@ -405,8 +429,7 @@ typedef void (^PTYTextViewDrawingHookBlock)(iTermTextDrawingHelper *);
 // Begins a new search. You may need to call continueFind repeatedly after this.
 - (void)findString:(NSString*)aString
   forwardDirection:(BOOL)direction
-      ignoringCase:(BOOL)ignoreCase
-             regex:(BOOL)regex
+      mode:(iTermFindMode)mode
         withOffset:(int)offset;
 
 // Remove highlighted terms from previous search.
@@ -501,6 +524,17 @@ typedef void (^PTYTextViewDrawingHookBlock)(iTermTextDrawingHelper *);
                   inDirection:(PTYTextViewSelectionExtensionDirection)direction
                            by:(PTYTextViewSelectionExtensionUnit)unit;
 
+- (void)moveSelectionEndpoint:(PTYTextViewSelectionEndpoint)endpoint
+                  inDirection:(PTYTextViewSelectionExtensionDirection)direction
+                           by:(PTYTextViewSelectionExtensionUnit)unit
+                  cursorCoord:(VT100GridCoord)cursorCoord;
+
+- (VT100GridWindowedRange)rangeByExtendingRange:(VT100GridWindowedRange)existingRange
+                                       endpoint:(PTYTextViewSelectionEndpoint)endpoint
+                                      direction:(PTYTextViewSelectionExtensionDirection)direction
+                                      extractor:(iTermTextExtractor *)extractor
+                                           unit:(PTYTextViewSelectionExtensionUnit)unit;
+
 // For focus follows mouse. Allows a new split pane to become focused even though the mouse pointer
 // is elsewhere. Records the mouse position. Refuses first responder as long as the mouse doesn't
 // move.
@@ -510,6 +544,8 @@ typedef void (^PTYTextViewDrawingHookBlock)(iTermTextDrawingHelper *);
 - (void)resetMouseLocationToRefuseFirstResponderAt;
 
 - (void)setTransparencyAffectsOnlyDefaultBackgroundColor:(BOOL)value;
+
+- (void)showFireworks;
 
 #pragma mark - Testing only
 

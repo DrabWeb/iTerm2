@@ -18,10 +18,11 @@ NSString *kSemanticHistoryTextKey = @"text";
 NSString *kSublimeText2Identifier = @"com.sublimetext.2";
 NSString *kSublimeText3Identifier = @"com.sublimetext.3";
 NSString *kMacVimIdentifier = @"org.vim.MacVim";
-NSString *kTextmateIdentifier = @"com.macromates.textmate";
+NSString *kTextmateIdentifier = @"com.macromates.TextMate";
 NSString *kTextmate2Identifier = @"com.macromates.TextMate.preview";
 NSString *kBBEditIdentifier = @"com.barebones.bbedit";
 NSString *kAtomIdentifier = @"com.github.atom";
+NSString *kVSCodeIdentifier = @"com.microsoft.VSCode";
 NSString *kSemanticHistoryBestEditorAction = @"best editor";
 NSString *kSemanticHistoryUrlAction = @"url";
 NSString *kSemanticHistoryEditorAction = @"editor";
@@ -45,6 +46,7 @@ enum {
     kSublimeText3Tag,
     kAtomTag,
     kTextmate2Tag,
+    kVSCodeTag,
     // Only append to the end of the list; never delete or change.
 };
 
@@ -60,36 +62,27 @@ enum {
     [super dealloc];
 }
 
-+ (BOOL)applicationExists:(NSString *)bundle_id
-{
-    CFURLRef appURL = nil;
-    OSStatus result = LSFindApplicationForInfo(kLSUnknownCreator,
-                                               (CFStringRef)bundle_id,
-                                               NULL,
-                                               NULL,
-                                               &appURL);
-    
-    if (appURL) {
-        CFRelease(appURL);
++ (BOOL)applicationExists:(NSString *)bundleId {
+    CFArrayRef appURLs = LSCopyApplicationURLsForBundleIdentifier((CFStringRef)bundleId, nil);
+    NSInteger count = appURLs ? CFArrayGetCount(appURLs) : 0;
+    if (appURLs) {
+        CFRelease(appURLs);
     }
     
-    switch (result) {
-        case noErr:
-            if ([bundle_id isEqualToString:kSublimeText2Identifier] ||
-                [bundle_id isEqualToString:kSublimeText3Identifier]) {
-                // Extra check for sublime text.
-                if (![[NSWorkspace sharedWorkspace] absolutePathForAppBundleWithIdentifier:bundle_id]) {
-                    return NO;
-                } else {
-                    return YES;
-                }
+    if (count > 0) {
+        if ([bundleId isEqualToString:kSublimeText2Identifier] ||
+            [bundleId isEqualToString:kSublimeText3Identifier]) {
+            // Extra check for sublime text.
+            if (![[NSWorkspace sharedWorkspace] absolutePathForAppBundleWithIdentifier:bundleId]) {
+                return NO;
             } else {
                 return YES;
             }
-        case kLSApplicationNotFoundErr:
-            return NO;
-        default:
-            return NO;
+        } else {
+            return YES;
+        }
+    } else {
+        return NO;
     }
 }
 
@@ -100,7 +93,8 @@ enum {
                                kTextmateIdentifier: @"txmt",
                                kTextmate2Identifier: @"txmt",
                                kBBEditIdentifier: @"txmt",
-                               kAtomIdentifier: @"atom" };
+                               kAtomIdentifier: @"atom",
+                               kVSCodeIdentifier: @"vscode" };
     return schemes[editor];
 }
 
@@ -112,7 +106,8 @@ enum {
               kTextmateIdentifier,
               kTextmate2Identifier,
               kBBEditIdentifier,
-              kAtomIdentifier ];
+              kAtomIdentifier,
+              kVSCodeIdentifier ];
 }
 
 + (NSString *)bestEditor {
@@ -131,7 +126,8 @@ enum {
                                   kTextmateIdentifier,
                                   kTextmate2Identifier,
                                   kBBEditIdentifier,
-                                  kAtomIdentifier ];
+                                  kAtomIdentifier,
+                                  kVSCodeIdentifier ];
     return [editorBundleIds containsObject:bundleId];
 }
 
@@ -142,7 +138,8 @@ enum {
                                 kTextmateIdentifier: @(kTextmateTag),
                                kTextmate2Identifier: @(kTextmate2Tag),
                                   kBBEditIdentifier: @(kBBEditTag),
-                                    kAtomIdentifier: @(kAtomTag) };
+                                    kAtomIdentifier: @(kAtomTag),
+                                  kVSCodeIdentifier: @(kVSCodeTag) };
     return tags;
 }
 
@@ -153,7 +150,8 @@ enum {
                                  kTextmateIdentifier: @"Textmate",
                                 kTextmate2Identifier: @"Textmate Preview",
                                    kBBEditIdentifier: @"BBEdit",
-                                     kAtomIdentifier: @"Atom" };
+                                     kAtomIdentifier: @"Atom",
+                                   kVSCodeIdentifier: @"VSCode" };
 
     NSDictionary *tags = [[self class] identifierToTagMap];
 
@@ -208,7 +206,8 @@ enum {
                                @(kTextmateTag): kTextmateIdentifier,
                               @(kTextmate2Tag): kTextmate2Identifier,
                                  @(kBBEditTag): kBBEditIdentifier,
-                                   @(kAtomTag): kAtomIdentifier };
+                                   @(kAtomTag): kAtomIdentifier,
+                                 @(kVSCodeTag): kVSCodeIdentifier };
     return map[@([[editors_ selectedItem] tag])];
 }
 

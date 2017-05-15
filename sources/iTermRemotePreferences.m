@@ -28,7 +28,7 @@
 
 - (void)dealloc {
     [_savedRemotePrefs release];
-    [super dealloc];
+    [super dealloc]; 
 }
 
 - (BOOL)shouldLoadRemotePrefs {
@@ -75,6 +75,8 @@
 {
     NSArray *exemptKeys = @[ kPreferenceKeyLoadPrefsFromCustomFolder,
                              kPreferenceKeyCustomFolder,
+                             @"Secure Input",
+                             @"moveToApplicationsFolderAlertSuppress",
                              @"iTerm Version" ];
     return ![exemptKeys containsObject:key] &&
             ![key hasPrefix:@"NS"] &&
@@ -83,8 +85,7 @@
             ![key hasPrefix:@"UK"];
 }
 
-- (NSDictionary *)freshCopyOfRemotePreferences
-{
+- (NSDictionary *)freshCopyOfRemotePreferences {
     if (!self.shouldLoadRemotePrefs) {
         return nil;
     }
@@ -105,14 +106,11 @@
                                              returningResponse:&response
                                                          error:&error];
         if (!data || error) {
-            [[NSAlert alertWithMessageText:@"Failed to load preferences from URL. "
-                                           @"Falling back to local copy."
-                             defaultButton:@"OK"
-                           alternateButton:nil
-                               otherButton:nil
-                 informativeTextWithFormat:@"HTTP request failed: %@",
-                                           [error description] ? [error description]
-                                                               : @"unknown error"] runModal];
+            NSAlert *alert = [[[NSAlert alloc] init] autorelease];
+            alert.messageText = @"Failed to load preferences from URL. Falling back to local copy.";
+            alert.informativeText = [NSString stringWithFormat:@"HTTP request failed: %@",
+                                     [error localizedDescription] ?: @"unknown error"];
+            [alert runModal];
             return NO;
         }
 
@@ -122,13 +120,11 @@
         NSString *tempFile = [tempDir stringByAppendingPathComponent:@"temp.plist"];
         error = nil;
         if (![data writeToFile:tempFile options:0 error:&error]) {
-            [[NSAlert alertWithMessageText:@"Failed to write to temp file while getting remote "
-                                           @"prefs. Falling back to local copy."
-                             defaultButton:@"OK"
-                           alternateButton:nil
-                               otherButton:nil
-                 informativeTextWithFormat:@"Error on file %@: %@", tempFile,
-                                           [error localizedFailureReason]] runModal];
+            NSAlert *alert = [[[NSAlert alloc] init] autorelease];
+            alert.messageText = @"Failed to write to temp file while getting remote prefs. Falling back to local copy.";
+            alert.informativeText = [NSString stringWithFormat:@"Error on file %@: %@", tempFile,
+                                     [error localizedDescription]];
+            [alert runModal];
             return NO;
         }
 
@@ -188,11 +184,10 @@
             @"To make it available, first quit iTerm2 and then manually "
             @"copy ~/Library/Preferences/com.googlecode.iterm2.plist to "
             @"your hosting provider.";
-        [[NSAlert alertWithMessageText:@"Sorry, preferences cannot be copied to a URL by iTerm2."
-                         defaultButton:@"OK"
-                       alternateButton:nil
-                           otherButton:nil
-             informativeTextWithFormat:@"%@", informativeText] runModal];
+        NSAlert *alert = [[[NSAlert alloc] init] autorelease];
+        alert.messageText = @"Preferences cannot be copied to a URL.";
+        alert.informativeText = informativeText;
+        [alert runModal];
         return;
     }
     
@@ -208,12 +203,11 @@
     BOOL isOk;
     isOk = [myDict writeToFile:filename atomically:YES];
     if (!isOk) {
-        [[NSAlert alertWithMessageText:@"Failed to copy preferences to custom directory."
-                         defaultButton:@"OK"
-                       alternateButton:nil
-                           otherButton:nil
-             informativeTextWithFormat:@"Tried to copy %@ to %@",
-          [self remotePrefsLocation], filename] runModal];
+        NSAlert *alert = [[[NSAlert alloc] init] autorelease];
+        alert.messageText = @"Failed to copy preferences to custom directory.";
+        alert.informativeText = [NSString stringWithFormat:@"Tried to copy %@ to %@",
+                                 [self remotePrefsLocation], filename];
+        [alert runModal];
     } else {
         self.savedRemotePrefs = myDict;
     }
@@ -249,13 +243,11 @@
         }
         return;
     } else {
-        [[NSAlert alertWithMessageText:@"Failed to load preferences from custom directory. "
-                                       @"Falling back to local copy."
-                         defaultButton:@"OK"
-                       alternateButton:nil
-                           otherButton:nil
-             informativeTextWithFormat:@"Missing or malformed file at \"%@\"",
-                                       [self customFolderOrURL]] runModal];
+        NSAlert *alert = [[[NSAlert alloc] init] autorelease];
+        alert.messageText = @"Failed to load preferences from custom directory. Falling back to local copy.";
+        alert.informativeText = [NSString stringWithFormat:@"Missing or malformed file at \"%@\"",
+                                 [self customFolderOrURL]];
+        [alert runModal];
     }
     return;
 }

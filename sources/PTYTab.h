@@ -52,6 +52,7 @@
 @property(nonatomic, readonly) NSSize tmuxSize;
 @property(nonatomic, copy) NSString *tmuxWindowName;
 @property (readonly, getter=isTmuxTab) BOOL tmuxTab;
+@property (nonatomic, readonly) PTYTabState state;
 
 // If non-nil, this session may not change size. This is useful when you want
 // to change a session's size. You can resize it, lock it, and then
@@ -63,8 +64,6 @@
 // the sessions are later restored from a saved arrangement during startup
 // activities, their contents can be rescued.
 + (void)registerSessionsInArrangement:(NSDictionary *)arrangement;
-
-+ (NSDictionary *)tmuxBookmark;
 
 + (void)drawArrangementPreview:(NSDictionary*)arrangement frame:(NSRect)frame;
 
@@ -78,7 +77,8 @@
                     inTerminal:(NSWindowController<iTermWindowController> *)term
                hasFlexibleView:(BOOL)hasFlexible
                        viewMap:(NSDictionary<NSNumber *, SessionView *> *)viewMap
-                    sessionMap:(NSDictionary<NSString *, PTYSession *> *)sessionMap;
+                    sessionMap:(NSDictionary<NSString *, PTYSession *> *)sessionMap
+                tmuxController:(TmuxController *)tmuxController;
 
 + (NSDictionary<NSString *, PTYSession *> *)sessionMapWithArrangement:(NSDictionary *)arrangement
                                                              sessions:(NSArray *)sessions;
@@ -88,10 +88,9 @@
                        tmuxWindow:(int)tmuxWindow
                    tmuxController:(TmuxController *)tmuxController;
 
-+ (void)setTmuxFont:(NSFont *)font
-       nonAsciiFont:(NSFont *)nonAsciiFont
-           hSpacing:(double)hs
-           vSpacing:(double)vs;
++ (NSDictionary *)repairedArrangement:(NSDictionary *)arrangement
+             replacingProfileWithGUID:(NSString *)badGuid
+                          withProfile:(Profile *)goodProfile;
 
 // init/dealloc
 - (instancetype)initWithSession:(PTYSession*)session;
@@ -182,6 +181,11 @@
 - (BOOL)layoutIsTooLarge;
 - (TmuxController *)tmuxController;
 
+- (void)setTmuxFont:(NSFont *)font
+       nonAsciiFont:(NSFont *)nonAsciiFont
+           hSpacing:(double)hs
+           vSpacing:(double)vs;
+
 - (void)moveCurrentSessionDividerBy:(int)direction horizontally:(BOOL)horizontally;
 - (BOOL)canMoveCurrentSessionDividerBy:(int)direction horizontally:(BOOL)horizontally;
 
@@ -200,5 +204,7 @@
 
 // Update icons in tab.
 - (void)updateIcon;
+
+- (void)checkInvariants:(NSString *)when;
 
 @end

@@ -9,7 +9,9 @@
 #import "iTermApplicationDelegate.h"
 
 #import "iTermAdvancedSettingsModel.h"
+#import "iTermFakeUserDefaults.h"
 #import "iTermPasteHelper.h"
+#import "iTermSelectorSwizzler.h"
 #import "iTermWarning.h"
 #import "NSData+iTerm.h"
 #import "NSStringITerm.h"
@@ -139,7 +141,7 @@ static const double kFloatingPointTolerance = 0.00001;
 
 - (void)testSanitizeEscapeSpecialCharacters {
     [self sanitizeString:kTestString
-                  expect:@"a\\ \\(\t\r\r\n" @"\x16" @"“”‘’–—b"
+                  expect:@"a\\ \\(\\\t\r\r\n" @"\x16" @"“”‘’–—b"
                    flags:kPasteFlagsEscapeSpecialCharacters
             tabTransform:kTabTransformNone
             spacesPerTab:0];
@@ -186,7 +188,7 @@ static const double kFloatingPointTolerance = 0.00001;
 }
 
 - (void)testSanitizeAllFlagsOn {
-    NSString *expectedString = @"a\\ \\(\t\r\r\\\"\\\"\\'\\'--b";
+    NSString *expectedString = @"a\\ \\(\\\t\r\r\\\"\\\"\\'\\'--b";
     NSData *data = [expectedString dataUsingEncoding:NSUTF8StringEncoding];
     NSString *expected = [data stringWithBase64EncodingWithLineBreak:@"\r"];
     [self sanitizeString:kTestString
@@ -221,7 +223,7 @@ static const double kFloatingPointTolerance = 0.00001;
     [_helper pasteString:kHelloWorld
                   slowly:NO
         escapeShellChars:NO
-                commands:NO
+                isUpload:NO
             tabTransform:kTabTransformNone
             spacesPerTab:0];
     [self runTimer];
@@ -234,7 +236,7 @@ static const double kFloatingPointTolerance = 0.00001;
     [_helper pasteString:kTestString
                   slowly:NO
         escapeShellChars:NO
-                commands:NO
+                isUpload:NO
             tabTransform:kTabTransformNone
             spacesPerTab:0];
     [self runTimer];
@@ -242,15 +244,63 @@ static const double kFloatingPointTolerance = 0.00001;
     XCTAssert([_writeBuffer isEqualToString:expected]);
 }
 
+- (void)testExpandTabsBeforeEscaping {
+    [_helper pasteString:@"\t"
+                  slowly:NO
+        escapeShellChars:YES
+                isUpload:NO
+            tabTransform:kTabTransformConvertToSpaces
+            spacesPerTab:4];
+    [self runTimer];
+    NSString *expected = @"\\ \\ \\ \\ ";
+    XCTAssert([_writeBuffer isEqualToString:expected]);
+}
+
+- (void)testEscapeDoesNotEscapeCarriageReturn {
+    [_helper pasteString:@"\r"
+                  slowly:NO
+        escapeShellChars:YES
+                isUpload:NO
+            tabTransform:kTabTransformConvertToSpaces
+            spacesPerTab:4];
+    [self runTimer];
+    NSString *expected = @"\r";
+    XCTAssert([_writeBuffer isEqualToString:expected]);
+}
+
 - (void)testPasteStringWithFlagsAndConvertToSpacesTabTransform {
     [_helper pasteString:kTestString
                   slowly:NO
         escapeShellChars:YES
-                commands:NO
+                isUpload:NO
             tabTransform:kTabTransformConvertToSpaces
             spacesPerTab:4];
     [self runTimer];
-    NSString *expected = @"a\\ \\(    \r\r“”‘’–—b";
+    NSString *expected = @"a\\ \\(\\ \\ \\ \\ \r\r“”‘’–—b";
+    XCTAssert([_writeBuffer isEqualToString:expected]);
+}
+
+- (void)testDoNotEscapeNonAscii {
+    [_helper pasteString:@"“"
+                  slowly:NO
+        escapeShellChars:YES
+                isUpload:NO
+            tabTransform:kTabTransformEscapeWithCtrlV
+            spacesPerTab:0];
+    [self runTimer];
+    NSString *expected = @"“";
+    XCTAssert([_writeBuffer isEqualToString:expected]);
+}
+
+- (void)testStripControlV {
+    [_helper pasteString:@"\x16"
+                  slowly:NO
+        escapeShellChars:YES
+                isUpload:NO
+            tabTransform:kTabTransformEscapeWithCtrlV
+            spacesPerTab:0];
+    [self runTimer];
+    NSString *expected = @"";
     XCTAssert([_writeBuffer isEqualToString:expected]);
 }
 
@@ -258,7 +308,7 @@ static const double kFloatingPointTolerance = 0.00001;
     [_helper pasteString:kTestString
                   slowly:NO
         escapeShellChars:YES
-                commands:NO
+                isUpload:NO
             tabTransform:kTabTransformEscapeWithCtrlV
             spacesPerTab:0];
     [self runTimer];
@@ -266,7 +316,23 @@ static const double kFloatingPointTolerance = 0.00001;
     XCTAssert([_writeBuffer isEqualToString:expected]);
 }
 
-- (void)testMultilineWarning {
+- (void)testMultilineWarningWithOverride {
+    iTermFakeUserDefaults *fakeDefaults = [[[iTermFakeUserDefaults alloc] init] autorelease];
+    [fakeDefaults setFakeObject:@YES forKey:@"PromptForPasteWhenNotAtPrompt"];
+    [fakeDefaults setFakeObject:@YES forKey:@"PromptForPasteWhenNotAtPrompt"];
+    [iTermSelectorSwizzler swizzleSelector:@selector(standardUserDefaults)
+                                 fromClass:[NSUserDefaults class]
+                                 withBlock:^ id { return fakeDefaults; }
+                                  forBlock:^{
+                                      [self doMultilineWarningTestWithOverride:YES];
+                                  }];
+}
+
+- (void)testMultilineWarningNoOverride {
+    [self doMultilineWarningTestWithOverride:NO];
+}
+
+- (void)testSingleLinePasteGivesNoWarning {
     __block BOOL warned = NO;
     [_warningBlock release];
     _warningBlock = [^NSModalResponse(NSAlert *alert, NSString *identifier) {
@@ -275,44 +341,67 @@ static const double kFloatingPointTolerance = 0.00001;
         return 1;  /* deprecated NSAlertDefaultReturn; */
     } copy];
 
-    // Check cr newline
-    [_helper pasteString:@"line 1\rline 2"
-                  slowly:NO
-        escapeShellChars:NO
-                commands:NO
-            tabTransform:kTabTransformNone
-            spacesPerTab:0];
-    XCTAssert(warned);
-
-    // Check lf newline
-    warned = NO;
-    [_helper pasteString:@"line 1\nline 2"
-                  slowly:NO
-        escapeShellChars:NO
-                commands:NO
-            tabTransform:kTabTransformNone
-            spacesPerTab:0];
-    XCTAssert(warned);
-
-    // Check crlf newline
-    warned = NO;
-    [_helper pasteString:@"line 1\r\nline 2"
-                  slowly:NO
-        escapeShellChars:NO
-                commands:NO
-            tabTransform:kTabTransformNone
-            spacesPerTab:0];
-    XCTAssert(warned);
-
     // Check no newline gives no warning.
     warned = NO;
     [_helper pasteString:@"line 1"
                   slowly:NO
         escapeShellChars:NO
-                commands:NO
+                isUpload:NO
             tabTransform:kTabTransformNone
             spacesPerTab:0];
     XCTAssert(!warned);
+
+}
+
+- (void)doMultilineWarningTestWithOverride:(BOOL)override {
+    __block BOOL warned = NO;
+    [_warningBlock release];
+    _warningBlock = [^NSModalResponse(NSAlert *alert, NSString *identifier) {
+        XCTAssert([identifier isEqualToString:[iTermAdvancedSettingsModel noSyncDoNotWarnBeforeMultilinePasteUserDefaultsKey]]);
+        warned = YES;
+        return 1;  /* deprecated NSAlertDefaultReturn; */
+    } copy];
+
+    // Check cr newline.
+    [_helper pasteString:@"line 1\rline 2"
+                  slowly:NO
+        escapeShellChars:NO
+                isUpload:NO
+            tabTransform:kTabTransformNone
+            spacesPerTab:0];
+    if (override) {
+        XCTAssert(warned);
+    } else {
+        XCTAssert(!warned);
+    }
+
+    // Check lf newline.
+    warned = NO;
+    [_helper pasteString:@"line 1\nline 2"
+                  slowly:NO
+        escapeShellChars:NO
+                isUpload:NO
+            tabTransform:kTabTransformNone
+            spacesPerTab:0];
+    if (override) {
+        XCTAssert(warned);
+    } else {
+        XCTAssert(!warned);
+    }
+
+    // Check crlf newline.
+    warned = NO;
+    [_helper pasteString:@"line 1\r\nline 2"
+                  slowly:NO
+        escapeShellChars:NO
+                isUpload:NO
+            tabTransform:kTabTransformNone
+            spacesPerTab:0];
+    if (override) {
+        XCTAssert(warned);
+    } else {
+        XCTAssert(!warned);
+    }
 }
 
 - (void)testBracketingOnPasteString {
@@ -320,7 +409,7 @@ static const double kFloatingPointTolerance = 0.00001;
     [_helper pasteString:kHelloWorld
                   slowly:NO
         escapeShellChars:NO
-                commands:NO
+                isUpload:NO
             tabTransform:kTabTransformNone
             spacesPerTab:0];
     [self runTimer];
@@ -337,7 +426,7 @@ static const double kFloatingPointTolerance = 0.00001;
     [_helper pasteString:test
                   slowly:NO
         escapeShellChars:NO
-                commands:NO
+                isUpload:NO
             tabTransform:kTabTransformNone
             spacesPerTab:0];
     _shouldBracket = NO;
@@ -353,7 +442,7 @@ static const double kFloatingPointTolerance = 0.00001;
     [_helper pasteString:test1
                   slowly:NO
         escapeShellChars:NO
-                commands:NO
+                isUpload:NO
             tabTransform:kTabTransformNone
             spacesPerTab:0];
     _shouldBracket = NO;
@@ -362,7 +451,7 @@ static const double kFloatingPointTolerance = 0.00001;
     [_helper pasteString:test2
                   slowly:NO
         escapeShellChars:NO
-                commands:NO
+                isUpload:NO
             tabTransform:kTabTransformNone
             spacesPerTab:0];
 
@@ -376,7 +465,7 @@ static const double kFloatingPointTolerance = 0.00001;
     [_helper pasteString:test
                   slowly:NO
         escapeShellChars:NO
-                commands:NO
+                isUpload:NO
             tabTransform:kTabTransformNone
             spacesPerTab:0];
     [self runTimer];
@@ -389,7 +478,7 @@ static const double kFloatingPointTolerance = 0.00001;
     [_helper pasteString:test
                   slowly:YES
         escapeShellChars:NO
-                commands:NO
+                isUpload:NO
             tabTransform:kTabTransformNone
             spacesPerTab:0];
     [self runTimer];
@@ -402,14 +491,14 @@ static const double kFloatingPointTolerance = 0.00001;
     [_helper pasteString:test1
                   slowly:NO
         escapeShellChars:NO
-                commands:NO
+                isUpload:NO
             tabTransform:kTabTransformNone
             spacesPerTab:0];
     NSString *test2 = [@"2" stringRepeatedTimes:2000];
     [_helper pasteString:test2
                   slowly:NO
         escapeShellChars:NO
-                commands:NO
+                isUpload:NO
             tabTransform:kTabTransformNone
             spacesPerTab:0];
     [self runTimer];
@@ -425,7 +514,7 @@ static const double kFloatingPointTolerance = 0.00001;
     [_helper pasteString:test1
                   slowly:NO
         escapeShellChars:NO
-                commands:NO
+                isUpload:NO
             tabTransform:kTabTransformNone
             spacesPerTab:0];
     [_helper enqueueEvent:[NSEvent keyEventWithType:NSKeyDown
@@ -442,7 +531,7 @@ static const double kFloatingPointTolerance = 0.00001;
     [_helper pasteString:test2
                   slowly:NO
         escapeShellChars:NO
-                commands:NO
+                isUpload:NO
             tabTransform:kTabTransformNone
             spacesPerTab:0];
     [self runTimer];

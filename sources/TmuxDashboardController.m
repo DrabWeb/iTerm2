@@ -203,9 +203,10 @@
 - (void)addWindow {
     NSString *lastName = [[windowsTable_ names] lastObject];
     if (lastName) {
-        [[self tmuxController] newWindowInSession:[sessionsTable_ selectedSessionName]
-                                 initialDirectory:[iTermInitialDirectory initialDirectoryFromProfile:[[ProfileModel sharedInstance] tmuxProfile]
-                                                                                          objectType:iTermWindowObject]];
+        TmuxController *tmuxController = self.tmuxController;
+        [tmuxController newWindowInSession:[sessionsTable_ selectedSessionName]
+                          initialDirectory:[iTermInitialDirectory initialDirectoryFromProfile:tmuxController.profile
+                                                                                   objectType:iTermWindowObject]];
     }
 }
 
@@ -245,6 +246,11 @@
 - (BOOL)haveOpenWindowWithId:(int)windowId
 {
     return [[self tmuxController] window:windowId] != nil;
+}
+
+- (void)tmuxWindowsTableDidSelectWindowWithId:(int)windowId {
+    PTYTab *tab = [[self tmuxController] window:windowId];
+    [tab.activeSession reveal];
 }
 
 - (NSString *)selectedSessionName

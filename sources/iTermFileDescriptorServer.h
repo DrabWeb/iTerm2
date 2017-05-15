@@ -3,6 +3,17 @@
 
 #include <sys/socket.h>
 
+// Because xcode is hot garbage, syslog(LOG_DEBUG) goes to its console so we turn that off for debug builds.
+#if DEBUG
+#define FDLog(level, format, ...) do { \
+    if (level < LOG_DEBUG) { \
+        syslog(level, "Client(%d) " format, getpid(), ##__VA_ARGS__); \
+    } \
+} while (0)
+#else
+#define FDLog(level, format, ...) syslog(level, "Client(%d) " format, getpid(), ##__VA_ARGS__)
+#endif
+
 typedef union {
     struct cmsghdr cm;
     char control[CMSG_SPACE(sizeof(int))];
@@ -26,5 +37,7 @@ int iTermFileDescriptorServerAccept(int socketFd);
 // equal length. On return, the readable FDs will have the corresponding value in `results` set to
 // true. Takes care of EINTR. Return value is number of readable FDs.
 int iTermSelect(int *fds, int count, int *results);
+
+void iTermFileDescriptorServerLog(char *format, ...);
 
 #endif  // __ITERM_FILE_DESCRIPTOR_SERVER_H

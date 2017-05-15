@@ -79,6 +79,9 @@ NSString *const kTmuxWindowOpenerWindowOptionStyleValueFullScreen = @"FullScreen
     [tabToUpdate_ release];
     [_windowOptions release];
     [_zoomed release];
+    [_tabColors release];
+    [_profile release];
+    
     [super dealloc];
 }
 
@@ -249,11 +252,10 @@ NSString *const kTmuxWindowOpenerWindowOptionStyleValueFullScreen = @"FullScreen
             [histories_ setObject:history forKey:wp];
         }
     } else {
-        [[NSAlert alertWithMessageText:@"Error: malformed history line from tmux."
-                         defaultButton:@"OK"
-                       alternateButton:@""
-                           otherButton:@""
-             informativeTextWithFormat:@"See Console.app for details"] runModal];
+        NSAlert *alert = [[[NSAlert alloc] init] autorelease];
+        alert.messageText = @"Error: malformed history line from tmux.";
+        alert.informativeText = @"See Console.app for details";
+        [alert runModal];
     }
     [self requestDidComplete];
 }
@@ -315,7 +317,7 @@ static int OctalValue(const char *bytes) {
         BOOL isNewWindow = NO;
         if (!tabToUpdate_) {
             DLog(@"Have no tab to update.");
-            if (![[[PTYTab tmuxBookmark] objectForKey:KEY_PREVENT_TAB] boolValue]) {
+            if (![self.profile[KEY_PREVENT_TAB] boolValue]) {
                 term = [self.controller windowWithAffinityForWindowId:self.windowIndex];
                 DLog(@"Term with affinity is %@", term);
             }
@@ -331,7 +333,7 @@ static int OctalValue(const char *bytes) {
                 DLog(@"Use original window %@", term);
             }
             if (!term) {
-                term = [[iTermController sharedInstance] openTmuxIntegrationWindowUsingProfile:[PTYTab tmuxBookmark]];
+                term = [[iTermController sharedInstance] openTmuxIntegrationWindowUsingProfile:self.profile];
                 isNewWindow = YES;
                 DLog(@"Opened a new window %@", term);
             }
@@ -439,6 +441,10 @@ static int OctalValue(const char *bytes) {
         parseTree[kLayoutDictHotkeyKey] = hotkey;
     }
 
+    if (self.tabColors[n]) {
+        parseTree[kLayoutDictTabColorKey] = self.tabColors[n];
+    }
+    
     return nil;
 }
 

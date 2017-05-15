@@ -27,7 +27,8 @@
     NSString *_lastStringSearchedFor;
 
     // The set of SearchResult objects for which matches have been found.
-    NSMutableArray *_searchResults;
+    // Sorted by reverse position (last in the buffer is first in the array).
+    NSMutableArray<SearchResult *> *_searchResults;
 
     // The next offset into _searchResults where values from _searchResults should
     // be added to the map.
@@ -50,11 +51,8 @@
     // highlight.
     BOOL _searchingForNextResult;
 
-    // True if the last search was case insensitive.
-    BOOL _findIgnoreCase;
-
-    // True if the last search was for a regex.
-    BOOL _findRegex;
+    // Mode for the last search.
+    iTermFindMode _mode;
 }
 
 - (instancetype)init {
@@ -78,8 +76,7 @@
 
 - (void)findString:(NSString *)aString
   forwardDirection:(BOOL)direction
-      ignoringCase:(BOOL)ignoreCase
-             regex:(BOOL)regex
+              mode:(iTermFindMode)mode
         withOffset:(int)offset
            context:(FindContext *)findContext
      numberOfLines:(int)numberOfLines
@@ -87,8 +84,7 @@
     _searchingForward = direction;
     _findOffset = offset;
     if ([_lastStringSearchedFor isEqualToString:aString] &&
-        _findRegex == regex &&
-        _findIgnoreCase == ignoreCase) {
+        _mode == mode) {
         _haveRevealedSearchResult = NO;  // select the next item before/after the current selection.
         _searchingForNextResult = YES;
         // I would like to call selectNextResultForward:withOffset: here, but
@@ -107,8 +103,7 @@
         // so it will get a result sooner.
         [_delegate findOnPageSetFindString:aString
                           forwardDirection:NO
-                              ignoringCase:ignoreCase
-                                     regex:regex
+                                      mode:mode
                                startingAtX:0
                                startingAtY:numberOfLines + 1 + totalScrollbackOverflow
                                 withOffset:0
@@ -124,8 +119,7 @@
         [self clearHighlights];
 
         // Initialize state with new values.
-        _findRegex = regex;
-        _findIgnoreCase = ignoreCase;
+        _mode = mode;
         _searchResults = [[NSMutableArray alloc] init];
         _searchingForNextResult = YES;
         _lastStringSearchedFor = [aString copy];
@@ -172,9 +166,10 @@
     BOOL redraw = NO;
 
     assert([self findInProgress]);
+    NSMutableArray<SearchResult *> *newSearchResults = [NSMutableArray array];
     if (_findInProgress) {
         // Collect more results.
-        more = [_delegate continueFindAllResults:_searchResults
+        more = [_delegate continueFindAllResults:newSearchResults
                                        inContext:context];
         *progress = [context progress];
     } else {
@@ -184,8 +179,7 @@
         _findInProgress = NO;
     }
     // Add new results to map.
-    for (int i = _numberOfProcessedSearchResults; i < [_searchResults count]; i++) {
-        SearchResult* r = [_searchResults objectAtIndex:i];
+    for (SearchResult *r in newSearchResults.reverseObjectEnumerator) {
         [self addSearchResult:r width:width];
         redraw = YES;
     }
@@ -209,6 +203,7 @@
 }
 
 - (void)addSearchResult:(SearchResult *)searchResult width:(int)width {
+    [_searchResults insertObject:searchResult atIndex:0];
     for (long long y = searchResult.absStartY; y <= searchResult.absEndY; y++) {
         NSNumber* key = [NSNumber numberWithLongLong:y];
         NSMutableData* data = _highlightMap[key];
@@ -278,14 +273,14 @@
         if (!found &&
             ((maxPos >= 0 && pos <= maxPos) ||
              (minPos >= 0 && pos >= minPos))) {
-                found = YES;
-                selectedRange =
-                    VT100GridCoordRangeMake(r.startX,
-                                            r.absStartY - overflowAdjustment,
-                                            r.endX + 1,  // half-open
-                                            r.absEndY - overflowAdjustment);
-                [_delegate findOnPageSelectRange:selectedRange wrapped:NO];
-            }
+            found = YES;
+            selectedRange =
+                VT100GridCoordRangeMake(r.startX,
+                                        r.absStartY - overflowAdjustment,
+                                        r.endX + 1,  // half-open
+                                        r.absEndY - overflowAdjustment);
+            [_delegate findOnPageSelectRange:selectedRange wrapped:NO];
+        }
         i += stride;
     }
 

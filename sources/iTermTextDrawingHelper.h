@@ -110,6 +110,13 @@
 // Is the cursor configured to blink?
 @property(nonatomic, assign) BOOL cursorBlinking;
 
+// Are we in copy mode?
+@property(nonatomic, assign) BOOL copyMode;
+@property(nonatomic, assign) BOOL copyModeSelecting;
+
+// Location of the copy-mode cursor
+@property(nonatomic, assign) VT100GridCoord copyModeCursorCoord;
+
 // Height of the "excess" region between the last line and the bottom of the view.
 @property(nonatomic, assign) double excess;
 
@@ -119,10 +126,10 @@
 // Should ambiguous-width characters be treated as double-width?
 @property(nonatomic, assign) BOOL ambiguousIsDoubleWidth;
 
-// Should the HFS+ unicode mapping be used? In practice, I can't find a way that this is used. We
+// Unicode normalization form to use. In practice, I can't find a way that this is used. We
 // don't normalize IME text on input unless there's a combining mark, but I don't know a case where
 // adding a combining mark would change a character from narrow to ambiguous width.
-@property(nonatomic, assign) BOOL useHFSPlusMapping;
+@property(nonatomic, assign) iTermUnicodeNormalization normalization;
 
 // Is a background image in use?
 @property(nonatomic, assign) BOOL hasBackgroundImage;

@@ -47,7 +47,9 @@ static const CGFloat kHelpMargin = 5;
         [searchField_ sizeToFit];
         searchField_.autoresizingMask = NSViewWidthSizable;
         searchField_.frame = NSMakeRect(0, 0, frame.size.width, searchField_.frame.size.height);
+        ITERM_IGNORE_PARTIAL_BEGIN
         [searchField_ setDelegate:self];
+        ITERM_IGNORE_PARTIAL_END
         [self addSubview:searchField_];
 
         help_ = [[NSButton alloc] initWithFrame:NSMakeRect(0, 0, 0, 0)];
@@ -279,11 +281,12 @@ static const CGFloat kHelpMargin = 5;
 }
 
 - (void)clear:(id)sender {
-    if (NSRunAlertPanel(@"Erase Command History",
-                        @"Command history for all hosts will be erased. Continue?",
-                        @"OK",
-                        @"Cancel",
-                        nil) == NSAlertDefaultReturn) {
+    NSAlert *alert = [[[NSAlert alloc] init] autorelease];
+    alert.messageText = @"Erase Command History";
+    alert.informativeText = @"Command history for all hosts will be erased. Continue?";
+    [alert addButtonWithTitle:@"OK"];
+    [alert addButtonWithTitle:@"Cancel"];
+    if ([alert runModal] == NSAlertFirstButtonReturn) {
         [[iTermShellHistoryController sharedInstance] eraseCommandHistory:YES directories:NO];
     }
 }

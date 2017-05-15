@@ -1,5 +1,6 @@
 // Implements the model class for a terminal session.
 
+#import "Api.pbobjc.h"
 #import "DVR.h"
 #import "FindViewController.h"
 #import "iTermFileDescriptorClient.h"
@@ -25,6 +26,8 @@ extern NSString *const kPTYSessionTmuxFontDidChange;
 
 // Called when captured output for the current session changes.
 extern NSString *const kPTYSessionCapturedOutputDidChange;
+
+extern NSString *const PTYSessionCreatedNotification;
 
 @class CapturedOutput;
 @class FakeWindow;
@@ -151,9 +154,6 @@ typedef enum {
            hSpacing:(double)horizontalSpacing
            vSpacing:(double)verticalSpacing;
 
-// Returns the profile to use for tmux sessions.
-- (Profile *)tmuxBookmark;
-
 // Notify the tab that this session, which is a tmux gateway, received a rename of a tmux window.
 - (void)sessionWithTmuxGateway:(PTYSession *)session
        wasNotifiedWindowWithId:(int)windowId
@@ -182,6 +182,17 @@ typedef enum {
 
 // The background color changed.
 - (void)sessionBackgroundColorDidChange:(PTYSession *)session;
+
+- (void)sessionKeyLabelsDidChange:(PTYSession *)session;
+
+- (void)sessionCurrentDirectoryDidChange:(PTYSession *)session;
+- (void)sessionCurrentHostDidChange:(PTYSession *)session;
+
+// Remove a session from the tab, even if it's the only one.
+- (void)sessionRemoveSession:(PTYSession *)session;
+
+// Returns the size of the tab in rows x cols. Initial tmux client size.
+- (VT100GridSize)sessionTmuxSizeWithProfile:(Profile *)profile;
 
 @end
 
@@ -416,6 +427,7 @@ typedef enum {
 // arrangement provided to us by the OS during system window restoration with a
 // session in a saved arrangement when we're opening a saved arrangement at
 // startup instead of respecting the wishes of system window restoration.
+// Also used by the websocket API to reference a session.
 @property(nonatomic, readonly) NSString *guid;
 
 // Indicates if this session predates a tmux split pane. Used to figure out which pane is new when
@@ -427,7 +439,15 @@ typedef enum {
 // If we want to show quicklook this will not be nil.
 @property(nonatomic, readonly) iTermQuickLookController *quickLookController;
 
+@property(nonatomic, readonly) NSDictionary<NSString *, NSString *> *keyLabels;
+@property(nonatomic, readonly) iTermRestorableSession *restorableSession;
+@property(nonatomic) BOOL copyMode;
+
 #pragma mark - methods
+
++ (NSDictionary *)repairedArrangement:(NSDictionary *)arrangement
+             replacingProfileWithGUID:(NSString *)badGuid
+                          withProfile:(Profile *)goodProfile;
 
 + (BOOL)handleShortcutWithoutTerminal:(NSEvent*)event;
 + (void)selectMenuItem:(NSString*)theName;
@@ -440,6 +460,9 @@ typedef enum {
 // Forget all sessions registered with registerSessionInArrangement. Normally
 // called after startup activities are done.
 + (void)removeAllRegisteredSessions;
+
+- (instancetype)init NS_UNAVAILABLE;
+- (instancetype)initSynthetic:(BOOL)synthetic NS_DESIGNATED_INITIALIZER;
 
 // Jump to a particular point in time.
 - (long long)irSeekToAtLeast:(long long)timestamp;
@@ -677,6 +700,24 @@ typedef enum {
 - (void)performKeyBindingAction:(int)keyBindingAction parameter:(NSString *)keyBindingText event:(NSEvent *)event;
 
 - (void)setColorsFromPresetNamed:(NSString *)presetName;
+
+- (void)triggerDidDetectStartOfPromptAt:(VT100GridAbsCoord)coord;
+- (void)triggerDidDetectEndOfPromptAt:(VT100GridAbsCoord)coord;
+
+// Burys a session
+- (void)bury;
+
+// Undoes burying of a session.
+- (void)disinter;
+
+- (void)jumpToLocationWhereCurrentStatusChanged;
+
+#pragma mark - API
+
+- (ITMGetBufferResponse *)handleGetBufferRequest:(ITMGetBufferRequest *)request;
+- (ITMGetPromptResponse *)handleGetPromptRequest:(ITMGetPromptRequest *)request;
+- (ITMNotificationResponse *)handleAPINotificationRequest:(ITMNotificationRequest *)request connection:(id)connection;
+- (ITMSetProfilePropertyResponse *)handleSetProfilePropertyForKey:(NSString *)key value:(id)value;
 
 #pragma mark - Testing utilities
 

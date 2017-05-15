@@ -152,7 +152,8 @@ typedef enum {
 
                 case ':':
                     if ((mode == 50 || mode == 1337) &&
-                        [data hasPrefixOfBytes:"File=" length:5]) {
+                        ([data hasPrefixOfBytes:"File=" length:5] ||
+                         [data hasPrefixOfBytes:"Copy=" length:5])) {
                         // This is a wonky special case for file downloads. The OSC code can be
                         // really, really big. So we mark it as ended at the colon, and the client
                         // is responsible for handling this properly.
@@ -197,6 +198,8 @@ typedef enum {
                @2: @(XTERMCC_WIN_TITLE),
                @4: @(XTERMCC_SET_RGB),
                @6: @(XTERMCC_PROPRIETARY_ETERM_EXT),
+               @7: @(XTERMCC_PWD_URL),
+               @8: @(XTERMCC_LINK),
                @9: @(ITERM_GROWL),
                // 50 is a nonstandard escape code implemented by Konsole.
                // xterm since started using it for setting the font, so 1337 is the preferred code

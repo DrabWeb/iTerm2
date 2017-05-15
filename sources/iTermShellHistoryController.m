@@ -170,7 +170,7 @@ static const NSTimeInterval kMaxTimeToRememberDirectories = 60 * 60 * 24 * 90;
     NSManagedObjectModel *managedObjectModel =
         [[[NSManagedObjectModel alloc] initWithContentsOfURL:modelURL] autorelease];
     if (!managedObjectModel) {
-        ELog(@"Failed to initialize managed object model for URL %@", modelURL);
+        XLog(@"Failed to initialize managed object model for URL %@", modelURL);
         return NO;
     }
 
@@ -251,13 +251,13 @@ static const NSTimeInterval kMaxTimeToRememberDirectories = 60 * 60 * 24 * 90;
         NSError *error = nil;
         NSDictionary *attributes = [[NSFileManager defaultManager] attributesOfItemAtPath:fullPath error:&error];
         if (error) {
-            ELog(@"Failed to get attributes of %@: %@", fullPath, error);
+            XLog(@"Failed to get attributes of %@: %@", fullPath, error);
             continue;
         }
         
         NSNumber *permissionsNumber = attributes[NSFilePosixPermissions];
         if (!permissionsNumber) {
-            ELog(@"Couldn't get permissions of file %@. Attributes are: %@", fullPath, attributes);
+            XLog(@"Couldn't get permissions of file %@. Attributes are: %@", fullPath, attributes);
             continue;
         }
         
@@ -269,7 +269,7 @@ static const NSTimeInterval kMaxTimeToRememberDirectories = 60 * 60 * 24 * 90;
             error = nil;
             [[NSFileManager defaultManager] setAttributes:updatedAttributes ofItemAtPath:fullPath error:&error];
             if (error) {
-                ELog(@"Failed to set attributes of %@ to %@: %@", fullPath, updatedAttributes, error);
+                XLog(@"Failed to set attributes of %@ to %@: %@", fullPath, updatedAttributes, error);
             }
         }
     }
@@ -449,22 +449,26 @@ static const NSTimeInterval kMaxTimeToRememberDirectories = 60 * 60 * 24 * 90;
     if (![firstResponder respondsToSelector:selector]) {
         firstResponder = nil;
     }
-    NSString *otherText = firstResponder ? @"Install Now" : nil;
-    switch (NSRunInformationalAlertPanel(@"About Shell Integration",
-                                         @"To use shell integration features such as "
-                                         @"Command History, "
-                                         @"Recent Directories, "
-                                         @"Select Output of Last Command, "
-                                         @"and Automatic Profile Switching, "
-                                         @"your shell must be properly configured.",
-                                         @"Learn More…",
-                                         @"OK",
-                                         otherText)) {
-        case NSAlertDefaultReturn:
+    NSAlert *alert = [[[NSAlert alloc] init] autorelease];
+    alert.messageText = @"About Shell Integration";
+    alert.informativeText =
+        @"To use shell integration features such as "
+        @"Command History, "
+        @"Recent Directories, "
+        @"Select Output of Last Command, "
+        @"and Automatic Profile Switching, "
+        @"your shell must be properly configured.";
+    [alert addButtonWithTitle:@"Learn More…"];
+    [alert addButtonWithTitle:@"OK"];
+    if (firstResponder) {
+        [alert addButtonWithTitle:@"Install Now"];
+    }
+    switch ([alert runModal]) {
+        case NSAlertFirstButtonReturn:
             [[NSWorkspace sharedWorkspace] openURL:[NSURL URLWithString:@"https://iterm2.com/shell_integration.html"]];
             break;
 
-        case NSAlertOtherReturn:
+        case NSAlertThirdButtonReturn:  // Install now, optional button
             [firstResponder performSelector:selector withObject:self];
             break;
     }

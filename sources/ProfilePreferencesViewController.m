@@ -35,7 +35,7 @@
 
 - (void)safeMakeFirstResponder:(NSView *)view {
     if (view.window == self) {
-        [self makeFirstResponder:self];
+        [self makeFirstResponder:view];
     }
 }
 
@@ -573,11 +573,11 @@ NSString *const kProfileSessionHotkeyDidChange = @"kProfileSessionHotkeyDidChang
     bulkCopyController.keysForKeyboard = [_keysViewController keysForBulkCopy];
     bulkCopyController.keysForAdvanced = [_advancedViewController keysForBulkCopy];
 
-    [NSApp beginSheet:bulkCopyController.window
-       modalForWindow:self.view.window
-        modalDelegate:self
-       didEndSelector:@selector(bulkCopyControllerCloseSheet:returnCode:contextInfo:)
-          contextInfo:bulkCopyController];
+    [self.view.window beginSheet:bulkCopyController.window completionHandler:^(NSModalResponse returnCode) {
+        [bulkCopyController.window close];
+        [bulkCopyController autorelease];
+        [[_delegate profilePreferencesModel] flush];
+    }];
 }
 
 - (IBAction)duplicateProfile:(id)sender
@@ -651,11 +651,10 @@ NSString *const kProfileSessionHotkeyDidChange = @"kProfileSessionHotkeyDidChang
     [pasteboard writeObjects:@[ profiles ]];
 
     if (errors) {
-        [NSAlert alertWithMessageText:@"Error"
-                        defaultButton:@"Ok"
-                      alternateButton:nil
-                          otherButton:nil
-            informativeTextWithFormat:@"An error occurred. Check Console.app for details."];
+        NSAlert *alert = [[[NSAlert alloc] init] autorelease];
+        alert.messageText = @"Error";
+        alert.informativeText = @"An error occurred. Check Console.app for details.";
+        [alert runModal];
     }
 }
 
@@ -673,12 +672,11 @@ NSString *const kProfileSessionHotkeyDidChange = @"kProfileSessionHotkeyDidChang
         [pasteboard clearContents];
         [pasteboard writeObjects:@[ string ]];
     } else {
-        [NSAlert alertWithMessageText:@"Error"
-                        defaultButton:@"Ok"
-                      alternateButton:nil
-                          otherButton:nil
-            informativeTextWithFormat:@"Couldn't convert profile to JSON: %@",
-                                      [error localizedDescription]];
+        NSAlert *alert = [[[NSAlert alloc] init] autorelease];
+        alert.messageText = @"Error";
+        alert.informativeText = [NSString stringWithFormat:@"Couldn't convert profile to JSON: %@",
+                                 [error localizedDescription]];
+        [alert runModal];
     }
 }
 
@@ -696,16 +694,6 @@ NSString *const kProfileSessionHotkeyDidChange = @"kProfileSessionHotkeyDidChang
     if ([[notification object] isEqual:[self selectedProfile][KEY_GUID]]) {
         [self reloadProfileInProfileViewControllers];
     }
-}
-
-#pragma mark - Sheet
-
-- (void)bulkCopyControllerCloseSheet:(NSWindow *)sheet
-                          returnCode:(int)returnCode
-                         contextInfo:(BulkCopyProfilePreferencesWindowController *)bulkCopyController {
-    [sheet close];
-    [bulkCopyController autorelease];
-    [[_delegate profilePreferencesModel] flush];
 }
 
 #pragma mark - iTermProfilesPreferencesBaseViewControllerDelegate

@@ -63,6 +63,8 @@ typedef NS_ENUM(NSUInteger, iTermHotkeyWindowType) {
 @property(nonatomic, readonly) BOOL keystrokesBeingStolen;
 @property(nonatomic, readonly) BOOL anyWindowIsMain;
 @property(nonatomic, readonly) NSArray<iTermTerminalWindow *> *keyTerminalWindows;
+@property(nonatomic, readonly) NSString *savedArrangementNameBeingRestored;
+@property(nonatomic, readonly) NSInteger numberOfDecodesPending;
 
 + (iTermController*)sharedInstance;
 + (void)releaseSharedInstance;
@@ -93,6 +95,10 @@ typedef NS_ENUM(NSUInteger, iTermHotkeyWindowType) {
 
 - (void)saveWindowArrangement:(BOOL)allWindows;
 - (void)loadWindowArrangementWithName:(NSString *)theName;
+- (void)loadWindowArrangementWithName:(NSString *)theName asTabs:(BOOL)asTabs;
+- (void)repairSavedArrangementNamed:(NSString *)savedArrangementName
+               replacingMissingGUID:(NSString *)guidToReplace
+                           withGUID:(NSString *)replacementGuid;
 
 - (void)terminalWillClose:(PseudoTerminal*)theTerminalWindow;
 - (void)addBookmarksToMenu:(NSMenu *)aMenu
@@ -137,7 +143,7 @@ typedef NS_ENUM(NSUInteger, iTermHotkeyWindowType) {
 
 // Indicates a rough guess as to whether a terminal window is substantially visible.
 // Being on another space will count as being obscured.
-// On OS 10.9+, if the window is completely covered by another app's window, it's obscured.
+// If the window is completely covered by another app's window, it's obscured.
 // If other iTerm windows cover more than ~40% of |terminal| then it's obscured.
 - (BOOL)terminalIsObscured:(id<iTermWindowController>)terminal;
 

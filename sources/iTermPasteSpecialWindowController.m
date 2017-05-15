@@ -344,7 +344,7 @@
     _pasteSpecialViewController.regexString = [iTermPreferences stringForKey:kPreferencesKeyPasteSpecialRegex];
     _pasteSpecialViewController.substitutionString = [iTermPreferences stringForKey:kPreferencesKeyPasteSpecialSubstitution];
     _pasteSpecialViewController.enableWaitForPrompt = _canWaitForPrompt;
-    _pasteSpecialViewController.shouldWaitForPrompt = _isAtShellPrompt;
+    _pasteSpecialViewController.shouldWaitForPrompt = _isAtShellPrompt && _canWaitForPrompt;
 
     [self updatePreview];
 }
@@ -410,29 +410,19 @@
                                                       isAtShellPrompt:isAtShellPrompt
                                                              encoding:encoding] autorelease];
     NSWindow *window = [controller window];
-    [NSApp beginSheet:window
-       modalForWindow:presentingWindow
-        modalDelegate:self
-       didEndSelector:@selector(sheetDidEnd:returnCode:contextInfo:)
-          contextInfo:nil];
+    [presentingWindow beginSheet:window completionHandler:^(NSModalResponse returnCode) {
+        [NSApp stopModal];
+    }];
 
     [NSApp runModalForWindow:window];
-    [NSApp endSheet:window];
+    [presentingWindow endSheet:window];
     [window orderOut:nil];
-    [window close];
+    [controller.window close];
 
     if (controller.shouldPaste) {
         completion(controller.pasteEvent);
         [controller saveUserDefaults];
     }
-}
-
-#pragma mark - Sheet Delegate
-
-+ (void)sheetDidEnd:(NSWindow *)sheet
-         returnCode:(NSInteger)returnCode
-        contextInfo:(void *)contextInfo {
-    [NSApp stopModal];
 }
 
 #pragma mark - Private

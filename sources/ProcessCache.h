@@ -32,13 +32,11 @@
 extern NSString *PID_INFO_IS_FOREGROUND;
 extern NSString *PID_INFO_NAME;
 
-@interface ProcessCache : NSObject {
-    NSMutableDictionary* pidInfoCache_;
-    BOOL newOutput_;
-    NSLock* lock_;
-}
+@interface ProcessCache : NSObject
 
 + (ProcessCache*)sharedInstance;
++ (NSArray *)allPids;
+
 - (NSSet *)childrenOfPid:(pid_t)thePid levelsToSkip:(int)skip;
 - (NSString*)getNameOfPid:(pid_t)thePid isForeground:(BOOL*)isForeground;
 - (NSDictionary *)dictionaryOfTaskInfoForPid:(pid_t)thePid;

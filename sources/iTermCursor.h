@@ -38,6 +38,7 @@ typedef struct {
 @property(nonatomic, assign) id<iTermCursorDelegate> delegate;
 
 + (iTermCursor *)cursorOfType:(ITermCursorType)theType;
++ (instancetype)copyModeCursorInSelectionState:(BOOL)selecting;
 
 // No default implementation.
 - (void)drawWithRect:(NSRect)rect
@@ -48,7 +49,7 @@ typedef struct {
                smart:(BOOL)smart
              focused:(BOOL)focused
                coord:(VT100GridCoord)coord
-          cellHeight:(CGFloat)cellHeight;
+             outline:(BOOL)outline;
 
 
 @end

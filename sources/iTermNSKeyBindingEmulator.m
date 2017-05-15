@@ -18,6 +18,7 @@
 // Entries map a "normalized key" (as produced by dictionaryKeyForCharacters:andFlags:) to either a
 // dictionary subtree, or to an array with a selector and its arguments.
 static NSDictionary *gRootKeyBindingsDictionary;
+static NSSet<NSString *> *gPointlessFirstKeystrokes;
 
 @interface iTermNSKeyBindingEmulator ()
 
@@ -41,30 +42,41 @@ static struct {
     { '@', NSCommandKeyMask }
 };
 
-@implementation iTermNSKeyBindingEmulator
+@implementation iTermNSKeyBindingEmulator {
+    NSMutableArray *_savedEvents;
+}
 
 + (void)initialize {
     if (self == [iTermNSKeyBindingEmulator self]) {
-        gRootKeyBindingsDictionary = [[self keyBindingsDictionary] retain];
+        [self loadKeyBindingsDictionary];
+        AppendPinnedDebugLogMessage(@"NSKeyBindingEmulator", @"Key bindings are:\n%@", gRootKeyBindingsDictionary);
     }
 }
 
-+ (NSDictionary *)keyBindingsDictionary {
++ (void)loadKeyBindingsDictionary {
     NSArray *paths = NSSearchPathForDirectoriesInDomains(NSLibraryDirectory,
                                                          NSUserDomainMask,
                                                          YES);
     
     if (![paths count]) {
-        return nil;
+        AppendPinnedDebugLogMessage(@"NSKeyBindingEmulator", @"Failed to find library directory.");
+        return;
     }
     NSString *bindPath =
         [paths[0] stringByAppendingPathComponent:@"KeyBindings/DefaultKeyBinding.dict"];
     NSDictionary *theDict = [NSDictionary dictionaryWithContentsOfFile:bindPath];
+    AppendPinnedDebugLogMessage(@"NSKeyBindingEmulator", @"Load dictionary\n%@", theDict);
     DLog(@"Loaded key bindings dictionary:\n%@", theDict);
-    return [self keyBindingDictionaryByPruningUselessBranches:[self keyBindingDictionaryByNormalizingModifiersInKeys:theDict]];
+
+    NSDictionary *keyBindingDictionary = [self keyBindingDictionaryByNormalizingModifiersInKeys:theDict];
+    NSMutableSet<NSString *> *temp = [NSMutableSet set];
+    gRootKeyBindingsDictionary = [[self keyBindingDictionaryByPruningUselessBranches:keyBindingDictionary
+                                                                 pointlessKeystrokes:temp] retain];
+    gPointlessFirstKeystrokes = [temp retain];
 }
 
-+ (NSDictionary *)keyBindingDictionaryByPruningUselessBranches:(NSDictionary *)node {
++ (NSDictionary *)keyBindingDictionaryByPruningUselessBranches:(NSDictionary *)node
+                                           pointlessKeystrokes:(NSMutableSet<NSString *> *)pointless {
     // Remove leafs that do not have an insertText: action.
     // Recursively rune dictionary values, removing them if empty.
     // Returns nil if the result would be an empty dictionary.
@@ -76,19 +88,22 @@ static struct {
     // user input. It brings us closer to Terminal, which no longer supports
     // key bindings at all.
     NSMutableDictionary *replacement = [NSMutableDictionary dictionary];
-    for (id key in node) {
+    for (NSString *key in node) {
         id value = node[key];
         if ([value isKindOfClass:[NSDictionary class]]) {
-            value = [self keyBindingDictionaryByPruningUselessBranches:value];
+            value = [self keyBindingDictionaryByPruningUselessBranches:value pointlessKeystrokes:nil];
         } else if ([value isKindOfClass:[NSArray class]]) {
             if (![[value firstObject] isEqualToString:@"insertText:"]) {
                 value = nil;
             }
         } else {
+            AppendPinnedDebugLogMessage(@"NSKeyBindingEmulator", @"Reject non-container leaf with key %@", key);
             value = nil;
         }
         if (value) {
             replacement[key] = value;
+        } else if ([node[key] isKindOfClass:[NSDictionary class]]) {
+            [pointless addObject:key];
         }
     }
     if ([replacement count]) {
@@ -266,19 +281,23 @@ static struct {
 - (instancetype)init {
     self = [super init];
     if (self) {
+        _savedEvents = [[NSMutableArray alloc] init];
         _currentDict = [gRootKeyBindingsDictionary retain];
     }
     return self;
 }
 
 - (void)dealloc {
+    [_savedEvents release];
     [_currentDict release];
     [super dealloc];
 }
 
-- (BOOL)handlesEvent:(NSEvent *)event {
-    if (!gRootKeyBindingsDictionary) {
-        DLog(@"Short-circuit DefaultKeyBindings handling because no bindings are defined");
+- (BOOL)handlesEvent:(NSEvent *)event pointlessly:(BOOL *)pointlessly extraEvents:(NSMutableArray *)extraEvents {
+    *pointlessly = NO;
+    if (!gRootKeyBindingsDictionary && [gPointlessFirstKeystrokes count] == 0) {
+        DLog(@"Short-circuit DefaultKeyBindings handling because no bindings are defined and there are no pointless leaders");
+        [_savedEvents removeAllObjects];
         return NO;
     }
     DLog(@"Checking if default key bindings should handle %@", event);
@@ -288,6 +307,7 @@ static struct {
         DLog(@"Couldn't normalize event to key!");
         NSLog(@"WARNING: Unexpected charactersIgnoringModifiers=%@ in event %@",
               event.charactersIgnoringModifiers, event);
+        [_savedEvents removeAllObjects];
         return NO;
     }
     NSObject *obj = nil;
@@ -305,19 +325,35 @@ static struct {
         // This is part of a multi-keystroke binding. Move down the tree.
         self.currentDict = (NSDictionary *)obj;
         DLog(@"Entered multi-keystroke binding with key: %@", selectedKey);
+        [_savedEvents addObject:event];
         return YES;
     }
 
     // Not (or no longer) in a multi-keystroke binding. Move to the root of the tree.
     self.currentDict = gRootKeyBindingsDictionary;
     DLog(@"Default key binding is %@", obj);
-    
+
+    for (NSString *theKey in possibleKeys) {
+        if ([gPointlessFirstKeystrokes containsObject:theKey]) {
+            *pointlessly = YES;
+            DLog(@"Keystroke is pointless. Caller should not pass to handleEvent or interpretKeyEvents.");
+            return YES;
+        }
+    }
+
     if (![obj isKindOfClass:[NSArray class]]) {
+        [extraEvents addObjectsFromArray:_savedEvents];
+        [_savedEvents removeAllObjects];
         return NO;
     }
     
     NSArray *theArray = (NSArray *)obj;
-    return ([theArray[0] isEqualToString:@"insertText:"]);
+    BOOL result = ([theArray[0] isEqualToString:@"insertText:"]);
+    if (!result) {
+        [extraEvents addObjectsFromArray:_savedEvents];
+    }
+    [_savedEvents removeAllObjects];
+    return result;
 }
 
 #pragma mark - Private

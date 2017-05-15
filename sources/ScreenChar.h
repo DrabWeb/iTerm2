@@ -29,6 +29,7 @@
  */
 
 #import <Cocoa/Cocoa.h>
+#import "ITAddressBookMgr.h"
 #import "NSStringITerm.h"
 #import "VT100GridTypes.h"
 
@@ -175,7 +176,11 @@ typedef struct screen_char_t
 
     // These bits aren't used but are defined here so that the entire memory
     // region can be initialized.
-    unsigned int unused : 6;
+    unsigned int unused : 5;
+
+    // This comes after unused so it can be byte-aligned.
+    // If the current text is part of a hypertext link, this gives an index into the URL store.
+    unsigned short urlCode;
 } screen_char_t;
 
 // Typically used to store a single screen line.
@@ -211,6 +216,7 @@ static inline BOOL ScreenCharacterAttributesEqual(screen_char_t *c1, screen_char
             c1->italic == c2->italic &&
             c1->blink == c2->blink &&
             c1->underline == c2->underline &&
+            !c1->urlCode == !c2->urlCode &&  // Only tests if urlCode is zero/nonzero in both
             c1->image == c2->image);
 }
 
@@ -226,6 +232,7 @@ static inline void CopyForegroundColor(screen_char_t* to, const screen_char_t fr
     to->italic = from.italic;
     to->blink = from.blink;
     to->underline = from.underline;
+    to->urlCode = from.urlCode;
     to->image = from.image;
 }
 
@@ -266,7 +273,8 @@ static inline BOOL ForegroundAttributesEqual(const screen_char_t a,
         a.faint != b.faint ||
         a.italic != b.italic ||
         a.blink != b.blink ||
-        a.underline != b.underline) {
+        a.underline != b.underline ||
+        !a.urlCode != !b.urlCode) {
         return NO;
     }
     if (a.foregroundColorMode == b.foregroundColorMode) {
@@ -295,7 +303,8 @@ static inline BOOL ScreenCharHasDefaultAttributesAndColors(const screen_char_t s
             !s.faint &&
             !s.italic &&
             !s.blink &&
-            !s.underline);
+            !s.underline &&
+            !s.urlCode);
 }
 
 // Represents an array of screen_char_t's as a string and facilitates mapping a
@@ -325,6 +334,9 @@ NSString* ComplexCharToStr(int key);
 NSString* ScreenCharToStr(screen_char_t* sct);
 NSString* CharToStr(unichar code, BOOL isComplex);
 
+// Performs the appropriate normalization.
+NSString *StringByNormalizingString(NSString *theString, iTermUnicodeNormalization normalization);
+
 // This is a faster version of ScreenCharToStr if what you want is an array of
 // unichars. Returns the number of code points appended to dest.
 int ExpandScreenChar(screen_char_t* sct, unichar* dest);
@@ -339,10 +351,10 @@ int AppendToComplexChar(int key, unichar codePoint);
 // Takes a non-complex character and adds a combining mark to it. It may or may not
 // become complex as a result, depending on whether there is an NFC form for the
 // new composite.
-void BeginComplexChar(screen_char_t *screenChar, unichar combiningChar, BOOL useHFSPlusMapping);
+void BeginComplexChar(screen_char_t *screenChar, unichar combiningChar, iTermUnicodeNormalization normalization);
 
 // Place a complex char in a screen char.
-void SetComplexCharInScreenChar(screen_char_t *screenChar, NSString *theString, BOOL useHFSPlusMapping);
+void SetComplexCharInScreenChar(screen_char_t *screenChar, NSString *theString, iTermUnicodeNormalization normalization);
 
 // Create or lookup & return the code for a complex char.
 int GetOrSetComplexChar(NSString* str);
@@ -398,7 +410,7 @@ void StringToScreenChars(NSString *s,
                          BOOL ambiguousIsDoubleWidth,
                          int *cursorIndex,
                          BOOL *foundDwc,
-                         BOOL useHFSPlusMapping,
+                         iTermUnicodeNormalization normalization,
                          NSInteger unicodeVersion);
 
 // Copy attributes from fg and bg, and zero out other fields. Text attributes like bold, italic, etc.

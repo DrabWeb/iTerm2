@@ -18,7 +18,7 @@
 @protocol VT100GridDelegate <NSObject>
 - (screen_char_t)gridForegroundColorCode;
 - (screen_char_t)gridBackgroundColorCode;
-- (BOOL)gridUseHFSPlusMapping;
+- (iTermUnicodeNormalization)gridUnicodeNormalizationForm;
 - (void)gridCursorDidMove;
 - (void)gridCursorDidChangeLine;
 @end
@@ -134,7 +134,8 @@
 // for |leave|.
 - (int)resetWithLineBuffer:(LineBuffer *)lineBuffer
        unlimitedScrollback:(BOOL)unlimitedScrollback
-        preserveCursorLine:(BOOL)preserveCursorLine;
+        preserveCursorLine:(BOOL)preserveCursorLine
+     additionalLinesToSave:(int)additionalLinesToSave;
 
 // Move the grid contents up, leaving only the whole wrapped line the cursor is on at the top.
 - (void)moveWrappedCursorLineToTopOfGrid;

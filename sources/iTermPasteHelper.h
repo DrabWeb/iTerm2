@@ -54,9 +54,17 @@ extern const int kNumberOfSpacesPerTabNoConversion;
 - (void)pasteString:(NSString *)theString
              slowly:(BOOL)slowly
    escapeShellChars:(BOOL)escapeShellChars
-           commands:(BOOL)commands
+           isUpload:(BOOL)isUpload
        tabTransform:(iTermTabTransformTags)tabTransform
        spacesPerTab:(int)spacesPerTab;
+
+- (void)pasteString:(NSString *)theString
+             slowly:(BOOL)slowly
+   escapeShellChars:(BOOL)escapeShellChars
+           isUpload:(BOOL)isUpload
+       tabTransform:(iTermTabTransformTags)tabTransform
+       spacesPerTab:(int)spacesPerTab
+           progress:(void (^)(NSInteger))progress;
 
 // The string comes from the paste special view controller.
 - (void)pasteString:(NSString *)theString stringConfig:(NSString *)jsonConfig;

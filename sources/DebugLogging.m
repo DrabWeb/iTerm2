@@ -8,6 +8,7 @@
 
 #import "DebugLogging.h"
 #import "iTermApplication.h"
+#import "NSFileManager+iTerm.h"
 #import "NSView+RecursiveDescription.h"
 #import <Cocoa/Cocoa.h>
 
@@ -109,6 +110,10 @@ void AppendPinnedDebugLogMessage(NSString *key, NSString *value, ...) {
 }
 
 void SetPinnedDebugLogMessage(NSString *key, NSString *value, ...) {
+    if (value == nil) {
+        [gPinnedMessages removeObjectForKey:key];
+        return;
+    }
     struct timeval tv;
     gettimeofday(&tv, NULL);
 
@@ -154,18 +159,80 @@ int DebugLogImpl(const char *file, int line, const char *function, NSString* val
     return 1;
 }
 
+void LogForNextCrash(const char *file, int line, const char *function, NSString* value) {
+    static NSFileHandle *handle;
+    NSFileHandle *handleToUse;
+    static dispatch_once_t onceToken;
+    static NSObject *object;
+    dispatch_once(&onceToken, ^{
+        object = [[NSObject alloc] init];
+    });
+    @synchronized (object) {
+        static NSInteger numLines;
+        if (numLines % 100 == 0) {
+            static NSInteger fileNumber;
+            NSString *path = [[[NSFileManager defaultManager] applicationSupportDirectory] stringByAppendingPathComponent:[NSString stringWithFormat:@"log.%ld.txt", fileNumber]];
+            fileNumber = (fileNumber + 1) % 3;
+            [[NSFileManager defaultManager] removeItemAtPath:path error:nil];
+            [[NSFileManager defaultManager] createFileAtPath:path contents:nil attributes:nil];
+            handle = [[NSFileHandle fileHandleForWritingAtPath:path] retain];
+            NSDateFormatter *dateFormatter = [[[NSDateFormatter alloc] init] autorelease];
+            dateFormatter.dateFormat = [NSDateFormatter dateFormatFromTemplate:@"yyyy-MM-dd HH:mm:ss.SSS ZZZ"
+                                                                       options:0
+                                                                        locale:nil];
+            NSDate *date = [NSDate dateWithTimeIntervalSinceNow:-clock()/CLOCKS_PER_SEC];
+            NSString *string = [NSString stringWithFormat:@"%@ %@\n", @(getpid()), [dateFormatter stringFromDate:date]];
+            [handle writeData:[string dataUsingEncoding:NSUTF8StringEncoding]];
+        }
+        handleToUse = [[handle retain] autorelease];
+        numLines++;
+    }
+
+    struct timeval tv;
+    gettimeofday(&tv, NULL);
+    const char *lastSlash = strrchr(file, '/');
+    if (!lastSlash) {
+        lastSlash = file;
+    } else {
+        lastSlash++;
+    }
+    NSString *string = [NSString stringWithFormat:@"%lld.%06lld %s:%d (%s): %@\n",
+                        (long long)tv.tv_sec, (long long)tv.tv_usec, lastSlash, line, function, value];
+    @synchronized (object) {
+        [handleToUse writeData:[string dataUsingEncoding:NSUTF8StringEncoding]];
+    }
+
+    AppendPinnedDebugLogMessage(@"CrashLogMessage", string);
+}
+
 static void StartDebugLogging() {
     static dispatch_once_t onceToken;
     dispatch_once(&onceToken, ^{
         gDebugLogLock = [[NSRecursiveLock alloc] init];
     });
     [gDebugLogLock lock];
-    [[NSFileManager defaultManager] removeItemAtURL:[NSURL fileURLWithPath:kDebugLogFilename]
-                                              error:nil];
-    gDebugLogStr = [[NSMutableString alloc] init];
-    gDebugLogging = !gDebugLogging;
-    WriteDebugLogHeader();
+    if (!gDebugLogging) {
+        [[NSFileManager defaultManager] removeItemAtURL:[NSURL fileURLWithPath:kDebugLogFilename]
+                                                  error:nil];
+        gDebugLogStr = [[NSMutableString alloc] init];
+        gDebugLogging = !gDebugLogging;
+        WriteDebugLogHeader();
+    }
     [gDebugLogLock unlock];
+}
+
+static BOOL StopDebugLogging() {
+    BOOL result = NO;
+    [gDebugLogLock lock];
+    if (gDebugLogging) {
+        gDebugLogging = NO;
+        FlushDebugLog();
+
+        [gDebugLogStr release];
+        result = YES;
+    }
+    [gDebugLogLock unlock];
+    return result;
 }
 
 void TurnOnDebugLoggingSilently(void) {
@@ -174,21 +241,24 @@ void TurnOnDebugLoggingSilently(void) {
     }
 }
 
+BOOL TurnOffDebugLoggingSilently(void) {
+    return StopDebugLogging();
+}
+
 void ToggleDebugLogging(void) {
     if (!gDebugLogging) {
-        NSRunAlertPanel(@"Debug Logging Enabled",
-                        @"Please reproduce the bug. Then toggle debug logging again to save the log.",
-                        @"OK", nil, nil);
+        NSAlert *alert = [[[NSAlert alloc] init] autorelease];
+        alert.messageText = @"Debug Logging Enabled";
+        alert.informativeText = @"Please reproduce the bug. Then toggle debug logging again to save the log.";
+        [alert addButtonWithTitle:@"OK"];
+        [alert runModal];
         StartDebugLogging();
     } else {
-        [gDebugLogLock lock];
-        gDebugLogging = !gDebugLogging;
-        FlushDebugLog();
-
-        NSRunAlertPanel(@"Debug Logging Stopped",
-                        @"Please send /tmp/debuglog.txt to the developers.",
-                        @"OK", nil, nil);
-        [gDebugLogStr release];
-        [gDebugLogLock unlock];
+        StopDebugLogging();
+        NSAlert *alert = [[[NSAlert alloc] init] autorelease];
+        alert.messageText = @"Debug Logging Stopped";
+        alert.informativeText = @"Please send /tmp/debuglog.txt to the developers.";
+        [alert addButtonWithTitle:@"OK"];
+        [alert runModal];
     }
 }

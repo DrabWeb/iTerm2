@@ -1,5 +1,6 @@
 #import <Cocoa/Cocoa.h>
 #import "PTYTextViewDataSource.h"
+#import "VT100TerminalDelegate.h"
 #import "VT100Token.h"
 
 @class VT100RemoteHost;
@@ -173,7 +174,7 @@
 - (void)screenIncrementBadge;
 
 // Bounce the dock. Set request to false to cancel.
-- (void)screenRequestAttention:(BOOL)request isCritical:(BOOL)isCritical;
+- (void)screenRequestAttention:(VT100AttentionRequestType)request;
 - (NSString *)screenCurrentWorkingDirectory;
 
 // Show/hide the cursor.
@@ -191,6 +192,7 @@
 - (void)screenSaveScrollPosition;
 - (VT100ScreenMark *)screenAddMarkOnLine:(int)line;
 - (void)screenPromptDidStartAtLine:(int)line;
+- (void)screenPromptDidEndAtLine:(int)line;
 
 - (void)screenActivateWindow;
 
@@ -204,8 +206,11 @@
 
 - (void)screenWillReceiveFileNamed:(NSString *)name ofSize:(int)size;
 - (void)screenDidFinishReceivingFile;
+- (void)screenDidFinishReceivingInlineFile;
 - (void)screenDidReceiveBase64FileData:(NSString *)data;
 - (void)screenFileReceiptEndedUnexpectedly;
+
+- (void)screenRequestUpload:(NSString *)args;
 
 - (iTermColorMap *)screenColorMap;
 - (void)screenSetCurrentTabColor:(NSColor *)color;
@@ -217,6 +222,8 @@
 
 - (void)screenCurrentHostDidChange:(VT100RemoteHost *)host;
 - (void)screenCurrentDirectoryDidChangeTo:(NSString *)newPath;
+- (void)screenDidReceiveCustomEscapeSequenceWithParameters:(NSDictionary<NSString *, NSString *> *)parameters
+                                                   payload:(NSString *)payload;
 
 // Ok to write to shell?
 - (BOOL)screenShouldSendReport;
@@ -239,5 +246,11 @@
 - (BOOL)screenShouldReduceFlicker;
 - (NSInteger)screenUnicodeVersion;
 - (void)screenSetUnicodeVersion:(NSInteger)unicodeVersion;
+- (void)screenSetLabel:(NSString *)label forKey:(NSString *)keyName;
+- (void)screenPushKeyLabels:(NSString *)value;
+- (void)screenPopKeyLabels:(NSString *)value;
+
+- (void)screenTerminalAttemptedPasteboardAccess;
+- (NSString *)screenValueOfVariableNamed:(NSString *)name;
 
 @end

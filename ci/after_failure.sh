@@ -1,14 +1,13 @@
 #!/usr/bin/env bash
 
-set -euo pipefail
 set -x
 
 if ls /tmp/failed-* 1> /dev/null 2>&1; then
   cp tests/imgcat /tmp
-  export path=($path $PWD/tests)
+  cp ci/accept.sh /tmp
+  export PATH=$PATH:$PWD/tests
   cd /tmp
   source /tmp/diffs > diffs.txt
-  tar cvfz failed-images.tgz failed-*.png diffs.txt
-  curl -F "file=@failed-images.tgz" https://file.io
+  tar cvfz - failed-*.png diffs.txt accept.sh | base64 -b 80
 fi
 

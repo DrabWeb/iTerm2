@@ -9,6 +9,7 @@
 #import "iTermAdvancedSettingsViewController.h"
 #import "iTermAdvancedSettingsModel.h"
 #import "NSApplication+iTerm.h"
+#import "NSMutableAttributedString+iTerm.h"
 #import <objc/runtime.h>
 
 NSString *const iTermAdvancedSettingsDidChange = @"iTermAdvancedSettingsDidChange";
@@ -17,7 +18,8 @@ typedef enum {
     kiTermAdvancedSettingTypeBoolean,
     kiTermAdvancedSettingTypeInteger,
     kiTermAdvancedSettingTypeFloat,
-    kiTermAdvancedSettingTypeString
+    kiTermAdvancedSettingTypeString,
+    kiTermAdvancedSettingTypeOptionalBoolean
 } iTermAdvancedSettingType;
 
 static NSString *const kAdvancedSettingIdentifier = @"kAdvancedSettingIdentifier";
@@ -83,6 +85,30 @@ static NSDictionary *gIntrospection;
         return defaultValue;
     } else {
         return [value boolValue];
+    }
+}
+
++ (BOOL *)optionalBoolForIdentifier:(NSString *)identifier
+                       defaultValue:(BOOL *)defaultValue
+                        description:(NSString *)description {
+    if (gIntrospecting) {
+        [gIntrospection autorelease];
+        gIntrospection = [@{ kAdvancedSettingIdentifier: identifier,
+                             kAdvancedSettingType: @(kiTermAdvancedSettingTypeOptionalBoolean),
+                             kAdvancedSettingDefaultValue: defaultValue ? @(*defaultValue) : [NSNull null],
+                             kAdvancedSettingDescription: description } retain];
+        return defaultValue;
+    }
+
+    NSNumber *value = [[NSUserDefaults standardUserDefaults] objectForKey:identifier];
+    if (!value) {
+        return nil;
+    } else if (value.boolValue) {
+        static BOOL yes = YES;
+        return &yes;
+    } else {
+        static BOOL no = NO;
+        return &no;
     }
 }
 
@@ -274,12 +300,10 @@ static NSDictionary *gIntrospection;
     if ([obj isKindOfClass:[NSString class]]) {
         return [[self attributedStringForGroupNamed:obj] size].height;
     } else {
-        NSCell *cell = [tableView preparedCellAtColumn:0 row:row];
-        [cell setWraps:YES];
-        NSTableColumn *column = [[tableView tableColumns] firstObject];
-        NSRect constrainedBounds = NSMakeRect(0, 0, column.width, CGFLOAT_MAX);
-        NSSize naturalSize = [cell cellSizeForBounds:constrainedBounds];
-        return naturalSize.height + 4;
+        NSTableColumn *tableColumn = tableView.tableColumns.firstObject;
+        NSAttributedString *attributedString = [self tableView:tableView objectValueForTableColumn:tableColumn row:row];
+        CGFloat height = [attributedString heightForWidth:tableColumn.width] + 4;
+        return height;
     }
 }
 
@@ -351,6 +375,15 @@ static NSDictionary *gIntrospection;
                     return @0;
                 }
             }
+            case kiTermAdvancedSettingTypeOptionalBoolean:
+                if ([value isKindOfClass:[NSNull class]]) {
+                    return @0;
+                } else if (![(NSNumber *)value boolValue]) {
+                    return @1;
+                } else {
+                    return @2;
+                }
+
             case kiTermAdvancedSettingTypeFloat:
             case kiTermAdvancedSettingTypeInteger:
                 return [NSString stringWithFormat:@"%@", value];
@@ -431,6 +464,16 @@ static NSDictionary *gIntrospection;
                 [cell setBordered:NO];
                 return cell;
             }
+            case kiTermAdvancedSettingTypeOptionalBoolean: {
+                NSPopUpButtonCell *cell =
+                        [[[NSPopUpButtonCell alloc] initTextCell:@"Unspecified" pullsDown:NO] autorelease];
+                [cell addItemWithTitle:@"Unspecified"];
+                [cell addItemWithTitle:@"No"];
+                [cell addItemWithTitle:@"Yes"];
+                [cell setBordered:NO];
+                return cell;
+            }
+
             case kiTermAdvancedSettingTypeString:
             case kiTermAdvancedSettingTypeFloat:
             case kiTermAdvancedSettingTypeInteger: {
@@ -475,6 +518,15 @@ static NSDictionary *gIntrospection;
             case kiTermAdvancedSettingTypeBoolean:
                 [[NSUserDefaults standardUserDefaults] setBool:!![anObject intValue]
                                                         forKey:identifier];
+                break;
+
+            case kiTermAdvancedSettingTypeOptionalBoolean:
+                if ([anObject intValue] == 0) {
+                    [[NSUserDefaults standardUserDefaults] removeObjectForKey:identifier];
+                } else {
+                    BOOL value = ([anObject intValue] == 1) ? NO : YES;
+                    [[NSUserDefaults standardUserDefaults] setBool:value forKey:identifier];
+                }
                 break;
 
             case kiTermAdvancedSettingTypeFloat:

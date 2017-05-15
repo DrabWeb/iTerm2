@@ -7,6 +7,7 @@
 
 #import "Coprocess.h"
 #import "DebugLogging.h"
+#import "iTermGrowlDelegate.h"
 #import "NSWorkspace+iTerm.h"
 #import "PreferencePanel.h"
 #import "ProcessCache.h"
@@ -35,7 +36,7 @@
 #include <util.h>
 
 #define CTRLKEY(c) ((c)-'A'+1)
-const int kNumFileDescriptorsToDup = 4;
+const int kNumFileDescriptorsToDup = NUM_FILE_DESCRIPTORS_TO_PASS_TO_SERVER;
 
 NSString *kCoprocessStatusChangeNotification = @"kCoprocessStatusChangeNotification";
 
@@ -280,7 +281,9 @@ static void HandleSigChld(int n) {
 // for transferring file descriptors, and fd 3 the write end of a pipe that closes when the server
 // dies.
 static void MyLoginTTY(int master, int slave, int serverSocketFd, int deadMansPipeWriteEnd) {
+    iTermFileDescriptorServerLog("Calling setsid");
     setsid();
+    iTermFileDescriptorServerLog("Calling ioctl");
     ioctl(slave, TIOCSCTTY, NULL);
 
     // This array keeps track of which file descriptors are in use and should not be dup2()ed over.
@@ -314,6 +317,7 @@ static void MyLoginTTY(int master, int slave, int serverSocketFd, int deadMansPi
             }
             if (!isInUse) {
                 // t is good. dup orig[o] to t and close orig[o]. Save t in temp[o].
+                iTermFileDescriptorServerLog("dup2 to candidate and close");
                 inuse[inuseCount++] = candidate;
                 temp[o] = candidate;
                 dup2(original, candidate);
@@ -326,6 +330,7 @@ static void MyLoginTTY(int master, int slave, int serverSocketFd, int deadMansPi
     // Dup the temp values to their desired values (which happens to equal the index in temp).
     // Close the temp file descriptors.
     for (int i = 0; i < sizeof(orig) / sizeof(*orig); i++) {
+        iTermFileDescriptorServerLog("dup2 to low number and close");
         dup2(temp[i], i);
         close(temp[i]);
     }
@@ -342,11 +347,13 @@ static int MyForkPty(int *amaster,
     int master;
     int slave;
 
+    iTermFileDescriptorServerLog("Calling openpty");
     if (openpty(&master, &slave, name, termp, winp) == -1) {
         NSLog(@"openpty failed: %s", strerror(errno));
         return -1;
     }
 
+    iTermFileDescriptorServerLog("Calling fork");
     pid_t pid = fork();
     switch (pid) {
         case -1:
@@ -356,6 +363,7 @@ static int MyForkPty(int *amaster,
 
         case 0:
             // child
+            iTermFileDescriptorServerLog("Calling MyLoginTTY in child process");
             MyLoginTTY(master, slave, serverSocketFd, deadMansPipeWriteEnd);
             return 0;
 
@@ -491,17 +499,18 @@ static int MyForkPty(int *amaster,
     pid_t pid;
     int connectionFd = -1;
     int numFileDescriptorsToPreserve;
+    BOOL closeFileDescriptors = YES;
     if ([iTermAdvancedSettingsModel runJobsInServers]) {
+        closeFileDescriptors = NO;
         // Create a temporary filename for the unix domain socket. It'll only exist for a moment.
         NSString *tempPath = [[NSWorkspace sharedWorkspace] temporaryFileNameWithPrefix:@"iTerm2-temp-socket."
                                                                                  suffix:@""];
         if (tempPath == nil) {
-            NSRunCriticalAlertPanel(@"Error",
-                                    @"An error was encountered while creating a temporary file with mkstemps. Verify that %@ exists and is writable.",
-                                    @"OK",
-                                    nil,
-                                    nil,
-                                    NSTemporaryDirectory());
+            NSAlert *alert = [[[NSAlert alloc] init] autorelease];
+            alert.messageText = @"Error";
+            alert.informativeText = [NSString stringWithFormat:@"An error was encountered while creating a temporary file with mkstemps. Verify that %@ exists and is writable.", NSTemporaryDirectory()];
+            [alert addButtonWithTitle:@"OK"];
+            [alert runModal];
             return;
         }
 
@@ -515,12 +524,15 @@ static int MyForkPty(int *amaster,
         // In another thread, accept on the unix domain socket. Since it's
         // already listening, there's no race here. connect will block until
         // accept is called if the main thread wins the race. accept will block
-        // til connect is called if the background thread wins the race. 
+        // til connect is called if the background thread wins the race.
+        iTermFileDescriptorServerLog("Kicking off a background job to accept() in the server");
         dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+            iTermFileDescriptorServerLog("Now running the accept queue block");
             serverConnectionFd = iTermFileDescriptorServerAccept(serverSocketFd);
 
             // Let the main thread go. This is necessary to ensure that
             // serverConnectionFd is written to before the main thread uses it.
+            iTermFileDescriptorServerLog("Signal the semaphore");
             dispatch_semaphore_signal(semaphore);
         });
 
@@ -529,7 +541,9 @@ static int MyForkPty(int *amaster,
         assert(connectionFd != -1);  // If this happens the block dispatched above never returns. Ran out of FDs, presumably.
 
         // Wait for serverConnectionFd to be written to.
+        iTermFileDescriptorServerLog("Waiting for the semaphore");
         dispatch_semaphore_wait(semaphore, DISPATCH_TIME_FOREVER);
+        iTermFileDescriptorServerLog("The semaphore was signaled");
 
         dispatch_release(semaphore);
 
@@ -544,6 +558,7 @@ static int MyForkPty(int *amaster,
         pipe(deadMansPipe);
         
         // This closes serverConnectionFd and deadMansPipe[1] in the parent process but not the child.
+        iTermFileDescriptorServerLog("Calling MyForkPty");
         pid = _serverPid = MyForkPty(&fd, theTtyname, &term, &win, serverConnectionFd, deadMansPipe[1]);
         numFileDescriptorsToPreserve = kNumFileDescriptorsToDup;
     } else {
@@ -562,8 +577,12 @@ static int MyForkPty(int *amaster,
 
         // Apple opens files without the close-on-exec flag (e.g., Extras2.rsrc).
         // See issue 2662.
-        for (int j = numFileDescriptorsToPreserve; j < getdtablesize(); j++) {
-            close(j);
+        if (closeFileDescriptors) {
+            // If running jobs in servers close file descriptors after exec when it's safe to
+            // enumerate files in /dev/fd. This is the potentially very slow path (issue 5391).
+            for (int j = numFileDescriptorsToPreserve; j < getdtablesize(); j++) {
+                close(j);
+            }
         }
 
         chdir(initialPwd);
@@ -583,11 +602,8 @@ static int MyForkPty(int *amaster,
     } else if (pid < (pid_t)0) {
         // Error
         PtyTaskDebugLog(@"%@ %s", progpath, strerror(errno));
-        NSRunCriticalAlertPanel(@"Unable to Fork!",
-                                @"iTerm2 cannot launch the program for this session.",
-                                @"OK",
-                                nil,
-                                nil);
+        [[iTermGrowlDelegate sharedInstance] growlNotify:@"Unable to fork!" withDescription:@"You may have too many processes already running."];
+        
         for (int j = 0; newEnviron[j]; j++) {
             free(newEnviron[j]);
         }

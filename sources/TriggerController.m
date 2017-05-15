@@ -16,8 +16,10 @@
 #import "FutureMethods.h"
 #import "GrowlTrigger.h"
 #import "HighlightTrigger.h"
+#import "iTermSetTitleTrigger.h"
 #import "ITAddressBookMgr.h"
 #import "iTermNoColorAccessoryButton.h"
+#import "iTermShellPromptTrigger.h"
 #import "MarkTrigger.h"
 #import "NSColor+iTerm.h"
 #import "PasswordTrigger.h"
@@ -105,6 +107,8 @@ static NSString *const kBackgroundColorWellIdentifier = @"kBackgroundColorWellId
                              [BounceTrigger class],
                              [CaptureTrigger class],
                              [GrowlTrigger class],
+                             [iTermShellPromptTrigger class],
+                             [iTermSetTitleTrigger class],
                              [SendTextTrigger class],
                              [ScriptTrigger class],
                              [CoprocessTrigger class],
@@ -239,7 +243,7 @@ static NSString *const kBackgroundColorWellIdentifier = @"kBackgroundColorWellId
 
 - (IBAction)removeTrigger:(id)sender {
     if (_tableView.selectedRow < 0) {
-        ELog(@"This shouldn't happen: you pressed the button to remove a trigger but no row is selected");
+        XLog(@"This shouldn't happen: you pressed the button to remove a trigger but no row is selected");
         return;
     }
     [self setTriggerDictionary:nil forRow:[_tableView selectedRow] reloadData:YES];

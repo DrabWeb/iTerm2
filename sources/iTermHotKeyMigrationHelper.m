@@ -200,24 +200,18 @@
         }
 
     }
-    NSAlert *alert = [NSAlert alertWithMessageText:@"Changes to Make"
-                                     defaultButton:@"OK"
-                                   alternateButton:@"Copy to Pasteboad"
-                                       otherButton:nil
-                         informativeTextWithFormat:@"Add these settings to the profile named “%@” in “%@”:\n%@",
-                      profile[KEY_NAME],
-                      filename,
-                      lines];
-    switch ([alert runModal]) {
-        case NSAlertDefaultReturn:
-            break;
-            
-        case NSAlertAlternateReturn: {
-            NSPasteboard *pasteBoard = [NSPasteboard generalPasteboard];
-            [pasteBoard declareTypes:@[ NSStringPboardType ] owner:self];
-            [pasteBoard setString:lines forType:NSStringPboardType];
-            break;
-        }
+    NSAlert *alert = [[[NSAlert alloc] init] autorelease];
+    alert.messageText = @"Changes to Make";
+    alert.informativeText = [NSString stringWithFormat:@"Add these settings to the profile named “%@” in “%@”:\n%@",
+                             profile[KEY_NAME],
+                             filename,
+                             lines];
+    [alert addButtonWithTitle:@"OK"];
+    [alert addButtonWithTitle:@"Copy to Pasteboad"];
+    if ([alert runModal] == NSAlertSecondButtonReturn) {
+        NSPasteboard *pasteBoard = [NSPasteboard generalPasteboard];
+        [pasteBoard declareTypes:@[ NSStringPboardType ] owner:self];
+        [pasteBoard setString:lines forType:NSStringPboardType];
     }
 }
 
@@ -241,7 +235,7 @@
                 NSError *error = nil;
                 NSData *data = [NSJSONSerialization dataWithJSONObject:dict options:NSJSONWritingPrettyPrinted error:&error];
                 if (error) {
-                    ELog(@"Failed to create JSON data from dictionary %@ with error %@", dict, error);
+                    XLog(@"Failed to create JSON data from dictionary %@ with error %@", dict, error);
                 }
                 return data;
             }

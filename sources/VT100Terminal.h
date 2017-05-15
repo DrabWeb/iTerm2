@@ -25,7 +25,7 @@
 // The "canonical" encoding, which is changed by user preference and never
 // escape code. On reset, we restore to this.
 @property(nonatomic, assign) NSStringEncoding canonicalEncoding;
-@property(nonatomic, readonly) BOOL reportFocus;
+@property(nonatomic, assign) BOOL reportFocus;
 
 @property(nonatomic, readonly) BOOL reverseVideo;
 @property(nonatomic, readonly) BOOL originMode;
@@ -35,6 +35,7 @@
 @property(nonatomic, readonly) BOOL isAnsi;
 @property(nonatomic, readonly) BOOL autorepeatMode;
 @property(nonatomic, assign) BOOL insertMode;
+@property(nonatomic, assign) BOOL sendReceiveMode;
 @property(nonatomic, readonly) int charset;  // G0 through G3
 @property(nonatomic, assign) MouseMode mouseMode;
 @property(nonatomic, assign) MouseFormat mouseFormat;
@@ -52,10 +53,19 @@
 @property(nonatomic, assign) BOOL allowKeypadMode;
 
 // http://www.xfree86.org/current/ctlseqs.html#Bracketed%20Paste%20Mode
-@property(nonatomic, readonly) BOOL bracketedPasteMode;
+@property(nonatomic, assign) BOOL bracketedPasteMode;
 @property(nonatomic, readonly) VT100Output *output;
 
 @property(nonatomic, readonly) NSDictionary *stateDictionary;
+
+// True if receiving a file in multitoken mode, or if between BeginFile and
+// EndFile codes (which are deprecated).
+@property(nonatomic, readonly) BOOL receivingFile;
+@property(nonatomic, readonly) BOOL copyingToPasteboard;
+
+// If nonnil then we're currently in a hypertext link.
+@property(nonatomic, readonly) NSURL *url;
+@property(nonatomic, readonly) NSString *urlParams;
 
 - (void)setStateFromDictionary:(NSDictionary *)dict;
 

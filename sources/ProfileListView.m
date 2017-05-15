@@ -26,6 +26,7 @@
 
 #import "DebugLogging.h"
 #import "ITAddressBookMgr.h"
+#import "NSMutableAttributedString+iTerm.h"
 #import "PTYSession.h"
 #import "ProfileModel.h"
 #import "ProfileModelWrapper.h"
@@ -88,7 +89,9 @@ const CGFloat kDefaultTagsWidth = 80;
         searchFieldFrame.size.width = frame.size.width;
         searchField_ = [[iTermSearchField alloc] initWithFrame:searchFieldFrame];
         [self _addTags:[[dataSource_ underlyingModel] allTags] toSearchField:searchField_];
+        ITERM_IGNORE_PARTIAL_BEGIN
         [searchField_ setDelegate:self];
+        ITERM_IGNORE_PARTIAL_END
         [self addSubview:searchField_];
         self.delegate = nil;
 
@@ -472,14 +475,10 @@ const CGFloat kDefaultTagsWidth = 80;
 }
 
 - (CGFloat)tableView:(NSTableView *)tableView heightOfRow:(NSInteger)rowIndex {
-    NSCell *cell = [tableView preparedCellAtColumn:[[tableView tableColumns] indexOfObject:tableColumn_]
-                                               row:rowIndex];
-    NSRect constrainedBounds = NSMakeRect(0, 0, tableColumn_.width, CGFLOAT_MAX);
-    NSSize naturalSize = [cell cellSizeForBounds:constrainedBounds];
+    NSAttributedString *attributedString = [self tableView:tableView objectValueForTableColumn:tableColumn_ row:rowIndex];
+    // tableview is a mess. Add some points so it works. Who knows why.
+    CGFloat height = [attributedString heightForWidth:tableColumn_.width] + [self extraHeight];
 
-    // I have no idea why I need extraHeight but maybe cellSizeForBounds: doesn't center content
-    // properly with attributed strings.
-    CGFloat height = naturalSize.height + [self extraHeight];
     _savedHeights[@(rowIndex)] = @(height);
     return height;
 }
@@ -527,14 +526,21 @@ const CGFloat kDefaultTagsWidth = 80;
         tagColor = [NSColor colorWithCalibratedWhite:0.5 alpha:1];
         highlightedBackgroundColor = [NSColor colorWithCalibratedRed:1 green:1 blue:0 alpha:0.4];
     }
+    NSMutableParagraphStyle *paragraphStyle = [[[NSMutableParagraphStyle alloc] init] autorelease];
+    paragraphStyle.lineBreakMode = NSLineBreakByTruncatingTail;
+
     NSDictionary* plainAttributes = @{ NSForegroundColorAttributeName: textColor,
+                                       NSParagraphStyleAttributeName: paragraphStyle,
                                        NSFontAttributeName: self.mainFont };
     NSDictionary* highlightedNameAttributes = @{ NSForegroundColorAttributeName: textColor,
+                                                 NSParagraphStyleAttributeName: paragraphStyle,
                                                  NSBackgroundColorAttributeName: highlightedBackgroundColor,
                                                  NSFontAttributeName: self.mainFont };
     NSDictionary* smallAttributes = @{ NSForegroundColorAttributeName: tagColor,
+                                       NSParagraphStyleAttributeName: paragraphStyle,
                                        NSFontAttributeName: self.tagFont };
     NSDictionary* highlightedSmallAttributes = @{ NSForegroundColorAttributeName: tagColor,
+                                                  NSParagraphStyleAttributeName: paragraphStyle,
                                                   NSBackgroundColorAttributeName: highlightedBackgroundColor,
                                                   NSFontAttributeName: self.tagFont };
     NSMutableAttributedString *theAttributedString =
@@ -572,7 +578,10 @@ const CGFloat kDefaultTagsWidth = 80;
 }
 
 - (NSAttributedString *)attributedStringForString:(NSString *)string selected:(BOOL)selected {
+    NSMutableParagraphStyle *paragraphStyle = [[[NSMutableParagraphStyle alloc] init] autorelease];
+    paragraphStyle.lineBreakMode = NSLineBreakByTruncatingTail;
     NSDictionary *attributes = @{ NSFontAttributeName: [NSFont systemFontOfSize:[NSFont systemFontSize]],
+                                  NSParagraphStyleAttributeName: paragraphStyle,
                                   NSForegroundColorAttributeName: (selected && [NSApp isActive] && self.window.isKeyWindow) ? [NSColor whiteColor] : [NSColor blackColor] };
     return [[[NSAttributedString alloc] initWithString:string attributes:attributes] autorelease];
 }

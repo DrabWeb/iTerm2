@@ -18,7 +18,7 @@
 + (NSString *)alternateMouseScrollStringForUp;
 + (NSString *)alternateMouseScrollStringForDown;
 + (BOOL)traditionalVisualBell;
-+ (double)hotkeyTermAnimationDuration DEPRECATED_ATTRIBUTE;
++ (double)hotkeyTermAnimationDuration;
 + (BOOL)hotkeyWindowFloatsAboveOtherWindows DEPRECATED_ATTRIBUTE;
 + (NSString *)searchCommand;
 + (BOOL)dockIconTogglesWindow DEPRECATED_ATTRIBUTE;
@@ -160,10 +160,30 @@
 + (int)terminalVMargin;
 + (BOOL)useColorfgbgFallback;
 + (BOOL)promptForPasteWhenNotAtPrompt;
++ (void)setPromptForPasteWhenNotAtPrompt:(BOOL)value;
 + (BOOL)performDNSLookups;
 + (BOOL)zeroWidthSpaceAdvancesCursor;
 + (BOOL)darkThemeHasBlackTitlebar;
 + (BOOL)fontChangeAffectsBroadcastingSessions;
 + (BOOL)zippyTextDrawing;
++ (BOOL)noSyncSuppressClipboardAccessDeniedWarning;
++ (void)setNoSyncSuppressClipboardAccessDeniedWarning:(BOOL)value;
++ (BOOL)noSyncSuppressMissingProfileInArrangementWarning;
++ (void)setNoSyncSuppressMissingProfileInArrangementWarning:(BOOL)value;
++ (BOOL)acceptOSC7;
++ (BOOL)trackingRunloopForLiveResize;
++ (BOOL)enableAPIServer;
++ (double)shortLivedSessionDuration;
++ (int)minimumTabDragDistance;
++ (BOOL)useVirtualKeyCodesForDetectingDigits;
++ (BOOL)excludeBackgroundColorsFromCopiedStyle;
++ (BOOL)useGCDUpdateTimer;
++ (BOOL)fullHeightCursor;
++ (BOOL)drawOutlineAroundCursor;
++ (double)underlineCursorOffset;
++ (BOOL)logRestorableStateSize;
++ (NSString *)autoLogFormat;
++ (BOOL)killSessionsOnLogout;
++ (BOOL)tmuxUsesDedicatedProfile;
 
 @end

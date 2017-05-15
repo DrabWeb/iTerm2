@@ -57,6 +57,8 @@ typedef NS_OPTIONS(NSUInteger, iTermPasteFlags) {
 @property(nonatomic, assign) int spacesPerTab;
 @property(nonatomic, copy) NSString *regex;
 @property(nonatomic, copy) NSString *substitution;
+@property(nonatomic, assign) BOOL isUpload;
+@property(nonatomic, copy) void (^progress)(NSInteger);
 
 + (instancetype)pasteEventWithString:(NSString *)string
                                flags:(iTermPasteFlags)flags

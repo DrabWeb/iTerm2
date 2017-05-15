@@ -32,6 +32,12 @@ typedef NS_ENUM(NSInteger, VT100TerminalUnits) {
     kVT100TerminalUnitsAuto,
 };
 
+typedef NS_ENUM(NSUInteger, VT100AttentionRequestType) {
+    VT100AttentionRequestTypeStartBouncingDockIcon,
+    VT100AttentionRequestTypeStopBouncingDockIcon,
+    VT100AttentionRequestTypeFireworks
+};
+
 @protocol VT100TerminalDelegate <NSObject>
 // Append a string at the cursor's position and advance the cursor, scrolling if necessary.
 - (void)terminalAppendString:(NSString *)string;
@@ -272,6 +278,7 @@ typedef NS_ENUM(NSInteger, VT100TerminalUnits) {
 
 // Sets the username@hostname or hostname of the current cursor location.
 - (void)terminalSetRemoteHost:(NSString *)remoteHost;
+- (void)terminalSetWorkingDirectoryURL:(NSString *)URL;
 
 // The profile should change to one with the name |value|.
 - (void)terminalProfileShouldChangeTo:(NSString *)value;
@@ -310,8 +317,12 @@ typedef NS_ENUM(NSInteger, VT100TerminalUnits) {
 // terminalDidReceiveBase64FileData: calls.
 - (void)terminalFileReceiptEndedUnexpectedly;
 
+// Begin sending a file upload (base64 filename + newline + base64 file + newline)
+// args are "multiple" (meaning multiple files are allowed) or "single".
+- (void)terminalRequestUpload:(NSString *)args;
+
 // Signal the user that the terminal wants attention.
-- (void)terminalRequestAttention:(BOOL)request;
+- (void)terminalRequestAttention:(VT100AttentionRequestType)request;
 
 // Set various colors.
 - (void)terminalSetForegroundColor:(NSColor *)color;
@@ -371,5 +382,26 @@ typedef NS_ENUM(NSInteger, VT100TerminalUnits) {
 - (void)terminalSetUnicodeVersion:(NSInteger)unicodeVersion;
 - (void)terminalSetColorNamed:(NSString *)name to:(NSString *)value;
 - (NSInteger)terminalUnicodeVersion;
+
+// Touch bar
+- (void)terminalSetLabel:(NSString *)label forKey:(NSString *)keyName;
+- (void)terminalPushKeyLabels:(NSString *)value;
+- (void)terminalPopKeyLabels:(NSString *)value;
+
+// Copy to pasteboard
+- (void)terminalBeginCopyToPasteboard;
+- (void)terminalDidReceiveBase64PasteboardString:(NSString *)string;
+- (void)terminalDidFinishReceivingPasteboard;
+- (void)terminalPasteboardReceiptEndedUnexpectedly;
+
+- (NSString *)terminalValueOfVariableNamed:(NSString *)name;
+
+// Links
+- (void)terminalWillEndLinkWithCode:(unsigned short)code;
+- (void)terminalWillStartLinkWithCode:(unsigned short)code;
+
+// Custom escape sequences
+- (void)terminalCustomEscapeSequenceWithParameters:(NSDictionary<NSString *, NSString *> *)parameters
+                                           payload:(NSString *)payload;
 
 @end

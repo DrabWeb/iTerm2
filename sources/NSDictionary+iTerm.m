@@ -27,6 +27,39 @@ static NSString *const kHotKeyKeyCode = @"keyCode";
 static NSString *const kHotKeyModifiers = @"modifiers";
 static NSString *const kHotKeyModifierActivation = @"modifier activation";
 
+@interface NSArray(SizeEstimation)
+@end
+
+@implementation NSArray(SizeEstimation)
+
+- (NSInteger)addSizeInfoToSizes:(NSMutableDictionary<NSString *, NSNumber *> *)sizes
+                         counts:(NSCountedSet<NSString *> *)counts
+                        keypath:(NSString *)keypath {
+    __block NSInteger total = 0;
+    NSString *path = [keypath stringByAppendingString:@"[*]"];
+    [self enumerateObjectsUsingBlock:^(id  _Nonnull obj, NSUInteger idx, BOOL * _Nonnull stop) {
+        NSInteger size;
+        if ([obj respondsToSelector:_cmd]) {
+            size = [(id)obj addSizeInfoToSizes:sizes counts:counts keypath:path];
+        } else if ([obj isKindOfClass:[NSString class]]) {
+            size = [(NSString *)obj length] * 2;
+        } else if ([obj isKindOfClass:[NSData class]]) {
+            size = [(NSData *)obj length];
+        } else {
+            // Enough space for an isa and a word. This is number, date, or null.
+            size = 16;
+        }
+        total += size;
+        NSNumber *n = sizes[path];
+        n = @(n.integerValue + size);
+        sizes[path] = n;
+        [counts addObject:path];
+    }];
+    return total;
+}
+
+@end
+
 @implementation NSDictionary (iTerm)
 
 + (NSDictionary *)dictionaryWithGridCoord:(VT100GridCoord)coord {
@@ -112,6 +145,12 @@ static NSString *const kHotKeyModifierActivation = @"modifier activation";
     }
 }
 
+- (BOOL)isColorValue {
+    return (self[kEncodedColorDictionaryRedComponent] != nil &&
+            self[kEncodedColorDictionaryGreenComponent] != nil &&
+            self[kEncodedColorDictionaryBlueComponent] != nil);
+}
+
 - (NSColor *)colorValue {
     return [self colorValueWithDefaultAlpha:1.0];
 }
@@ -157,12 +196,57 @@ static NSString *const kHotKeyModifierActivation = @"modifier activation";
     return temp;
 }
 
+- (NSDictionary *)dictionaryByRemovingObjectForKey:(id)key {
+    NSMutableDictionary *temp = [self mutableCopy];
+    [temp removeObjectForKey:key];
+    return temp;
+}
+
 - (NSData *)propertyListData {
     NSString *filename = [[NSWorkspace sharedWorkspace] temporaryFileNameWithPrefix:@"DictionaryPropertyList" suffix:@"iTerm2"];
     [self writeToFile:filename atomically:NO];
     NSData *data = [NSData dataWithContentsOfFile:filename];
     [[NSFileManager defaultManager] removeItemAtPath:filename error:nil];
     return data;
+}
+
+- (NSString *)sizeInfo {
+    NSMutableDictionary<NSString *, NSNumber *> *sizes = [NSMutableDictionary dictionary];
+    NSCountedSet<NSString *> *counts = [[[NSCountedSet alloc] init] autorelease];
+    sizes[@""] = @([self addSizeInfoToSizes:sizes counts:counts keypath:@""]);
+    [counts addObject:@""];
+
+    NSMutableString *result = [NSMutableString string];
+    [sizes enumerateKeysAndObjectsUsingBlock:^(NSString * _Nonnull key, NSNumber * _Nonnull obj, BOOL * _Nonnull stop) {
+        [result appendFormat:@"%@ %@ %@\n", obj, @([counts countForObject:key]), key];
+    }];
+    return result;
+}
+
+- (NSInteger)addSizeInfoToSizes:(NSMutableDictionary<NSString *, NSNumber *> *)sizes
+                    counts:(NSCountedSet<NSString *> *)counts
+                   keypath:(NSString *)keypath {
+    __block NSInteger total = 0;
+    [self enumerateKeysAndObjectsUsingBlock:^(id  _Nonnull key, id  _Nonnull obj, BOOL * _Nonnull stop) {
+        NSInteger size;
+        NSString *path = [keypath stringByAppendingFormat:@".%@", key];
+        if ([obj respondsToSelector:_cmd]) {
+            size = [(id)obj addSizeInfoToSizes:sizes counts:counts keypath:path];
+        } else if ([obj isKindOfClass:[NSString class]]) {
+            size = [(NSString *)obj length] * 2;
+        } else if ([obj isKindOfClass:[NSData class]]) {
+            size = [(NSData *)obj length];
+        } else {
+            // Enough space for an isa and a word. This is number, date, or null.
+            size = 16;
+        }
+        total += size;
+        NSNumber *n = sizes[path];
+        n = @(n.integerValue + size);
+        sizes[path] = n;
+        [counts addObject:path];
+    }];
+    return total;
 }
 
 @end

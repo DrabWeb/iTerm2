@@ -36,6 +36,7 @@
 }
 
 - (void)dealloc {
+    [_jobsTable release];
     _jobsTable.dataSource = nil;
     _jobsTable.delegate = nil;
     [super dealloc];
@@ -46,6 +47,7 @@
         return;
     }
     _awoken = YES;
+    [_jobsTable retain];
     [[NSNotificationCenter defaultCenter] addObserver:self
                                              selector:@selector(reloadProfiles)
                                                  name:kReloadAllProfiles
@@ -266,7 +268,7 @@
     [panel setCanChooseDirectories:YES];
     [panel setAllowsMultipleSelection:NO];
 
-    if ([panel runModal] == NSOKButton) {
+    if ([panel runModal] == NSModalResponseOK) {
         NSString *path = [[panel directoryURL] path];
         _logDir.stringValue = path;
         [self setString:path forKey:KEY_LOGDIR];

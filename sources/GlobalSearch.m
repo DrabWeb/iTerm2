@@ -198,8 +198,7 @@ const double GLOBAL_SEARCH_MARGIN = 10;
         findContext_ = [[FindContext alloc] init];
         [textViewDataSource_ setFindString:findString_
                           forwardDirection:NO
-                              ignoringCase:YES
-                                     regex:NO
+                              mode:iTermFindModeCaseInsensitiveSubstring
                                startingAtX:0
                                startingAtY:(long long)([textViewDataSource_ numberOfLines] + 1) + [textViewDataSource_ totalScrollbackOverflow]
                                 withOffset:0  // 1?
@@ -344,7 +343,9 @@ const double GLOBAL_SEARCH_MARGIN = 10;
 - (void)awakeFromNib
 {
     [self view];  // make sure the view is instantiated
+    ITERM_IGNORE_PARTIAL_BEGIN
     [searchField_ setDelegate:self];
+    ITERM_IGNORE_PARTIAL_END
     [searchField_ setArrowHandler:tableView_];
     [tableView_ setDataSource:self];
     [tableView_ setDelegate:self];
