@@ -37,3 +37,10 @@
 
 @end
 
+@interface NSFont(PTYFontInfo)
+@property (nonatomic, readonly) BOOL it_defaultLigatures;
+
+// 0 means ligatures are not supported at all for this font.
+@property (nonatomic, readonly) NSInteger it_ligatureLevel;
+
+@end

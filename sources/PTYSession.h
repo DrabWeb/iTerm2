@@ -28,6 +28,8 @@ extern NSString *const kPTYSessionTmuxFontDidChange;
 extern NSString *const kPTYSessionCapturedOutputDidChange;
 
 extern NSString *const PTYSessionCreatedNotification;
+extern NSString *const PTYSessionTerminatedNotification;
+extern NSString *const PTYSessionRevivedNotification;
 
 @class CapturedOutput;
 @class FakeWindow;
@@ -154,10 +156,8 @@ typedef enum {
            hSpacing:(double)horizontalSpacing
            vSpacing:(double)verticalSpacing;
 
-// Notify the tab that this session, which is a tmux gateway, received a rename of a tmux window.
-- (void)sessionWithTmuxGateway:(PTYSession *)session
-       wasNotifiedWindowWithId:(int)windowId
-                     renamedTo:(NSString *)newName;
+// The tmux window title changed.
+- (void)sessionDidChangeTmuxWindowNameTo:(NSString *)newName;
 
 // Returns the objectSpecifier of the tab (used to identify a tab for Applescript).
 - (NSScriptObjectSpecifier *)objectSpecifier;
@@ -443,6 +443,11 @@ typedef enum {
 @property(nonatomic, readonly) iTermRestorableSession *restorableSession;
 @property(nonatomic) BOOL copyMode;
 
+// Is the user currently typing at a password prompt?
+@property(nonatomic, readonly) BOOL passwordInput;
+
+@property(nonatomic) BOOL isSingleUseSession;
+
 #pragma mark - methods
 
 + (NSDictionary *)repairedArrangement:(NSDictionary *)arrangement
@@ -643,7 +648,12 @@ typedef enum {
 - (void)setFocused:(BOOL)focused;
 - (BOOL)wantsContentChangedNotification;
 
-- (void)startTmuxMode;
+// The dcsID identifies the parser associated with this session. Parsers run in
+// a different thread and communication between the main thread and the parser
+// thread use the dcsID to ensure that the current parser is still the one that
+// the main thread is expecting.
+- (void)startTmuxMode:(NSString *)dcsID;
+
 - (void)tmuxDetach;
 // Two sessions are compatible if they may share the same tab. Tmux clients
 // impose this restriction because they must belong to the same controller.

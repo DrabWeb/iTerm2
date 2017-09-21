@@ -236,12 +236,29 @@ static NSString *const kArrangement = @"Arrangement";
     return rect.origin;
 }
 
+- (BOOL)rect:(NSRect)rect intersectsAnyScreenExcept:(NSScreen *)allowedScreen {
+    return [[NSScreen screens] anyWithBlock:^BOOL(NSScreen *screen) {
+        if (screen == allowedScreen) {
+            return NO;
+        }
+        NSRect screenFrame = screen.frame;
+        return NSIntersectsRect(rect, screenFrame);
+    }];
+}
+
 - (void)rollInAnimatingInDirection:(iTermAnimationDirection)direction {
     [self moveToPreferredScreen];
-    [self.windowController.window setFrameOrigin:[self hiddenOriginForScreen:self.windowController.screen]];
+    self.windowController.window.alphaValue = 0;
 
     NSRect destination = [self preferredFrameForWindowController:self.windowController];
-    self.windowController.window.alphaValue = 0;
+    NSRect proposedHiddenRect = self.windowController.window.frame;
+    proposedHiddenRect.origin = [self hiddenOriginForScreen:self.windowController.screen];
+    if ([self rect:proposedHiddenRect intersectsAnyScreenExcept:self.windowController.window.screen]) {
+        [self.windowController.window setFrame:destination display:YES];
+    } else {
+        [self.windowController.window setFrameOrigin:proposedHiddenRect.origin];
+    }
+
     [NSAnimationContext runAnimationGroup:^(NSAnimationContext * _Nonnull context) {
         [context setDuration:[iTermAdvancedSettingsModel hotkeyTermAnimationDuration]];
         [context setTimingFunction:[CAMediaTimingFunction functionWithName:kCAMediaTimingFunctionEaseIn]];
@@ -258,6 +275,10 @@ static NSString *const kArrangement = @"Arrangement";
     NSRect source = self.windowController.window.frame;
     NSRect destination = source;
     destination.origin = [self hiddenOriginForScreen:self.windowController.window.screen];
+
+    if ([self rect:destination intersectsAnyScreenExcept:self.windowController.window.screen]) {
+        destination = source;
+    }
 
     [NSAnimationContext runAnimationGroup:^(NSAnimationContext * _Nonnull context) {
         [context setDuration:[iTermAdvancedSettingsModel hotkeyTermAnimationDuration]];
@@ -353,14 +374,7 @@ static NSString *const kArrangement = @"Arrangement";
         [NSApp activateIgnoringOtherApps:YES];
     }
     [self.windowController.window makeKeyAndOrderFront:nil];
-    if (!animated) {
-        [self moveToPreferredScreen];
-        self.windowController.window.alphaValue = 1;
-        [self rollInFinished];
-        return;
-    }
-    
-    if ([iTermProfilePreferences boolForKey:KEY_HOTKEY_ANIMATE inProfile:self.profile]) {
+    if (animated) {
         switch (self.windowController.windowType) {
             case WINDOW_TYPE_TOP:
             case WINDOW_TYPE_TOP_PARTIAL:
@@ -384,6 +398,7 @@ static NSString *const kArrangement = @"Arrangement";
                 assert(false);
         }
     } else {
+        [self moveToPreferredScreen];
         self.windowController.window.alphaValue = 1;
         [self rollInFinished];
     }
@@ -762,7 +777,7 @@ static NSString *const kArrangement = @"Arrangement";
         [self createWindowWithURL:url];
         result = YES;
     }
-    [self rollInAnimated:YES];
+    [self rollInAnimated:[iTermProfilePreferences boolForKey:KEY_HOTKEY_ANIMATE inProfile:self.profile]];
     return result;
 }
 
@@ -778,10 +793,8 @@ static NSString *const kArrangement = @"Arrangement";
         [self fastHideHotKeyWindow];
     }
 
-    // If there are any problems here, iterate over self.windowController.window.sheets which was
-    // added in 10.9. This is a workaround from before we dropped 10.8.
-    while (self.windowController.window.attachedSheet) {
-        [NSApp endSheet:self.windowController.window.attachedSheet];
+    for (NSWindow *sheet in self.windowController.window.sheets) {
+        [self.windowController.window endSheet:sheet];
     }
     self.closedByOtherHotkeyWindowOpening = otherIsRollingIn;
     [self rollOut];

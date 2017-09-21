@@ -67,6 +67,8 @@ const NSInteger kPSMStartResizeAnimation = 0;
     // drag and drop
     NSEvent *_lastMouseDownEvent; // keep this for dragging reference
     NSEvent *_lastMiddleMouseDownEvent;
+    BOOL _haveInitialDragLocation;
+    NSPoint _initialDragLocation;
     BOOL _didDrag;
     BOOL _closeClicked;
 
@@ -226,7 +228,12 @@ const NSInteger kPSMStartResizeAnimation = 0;
 }
 
 - (void)sanityCheck:(NSString *)callsite {
-    if ([[PSMTabDragAssistant sharedDragAssistant] isDragging]) {
+    [self sanityCheck:callsite force:NO];
+}
+
+- (void)sanityCheck:(NSString *)callsite force:(BOOL)force {
+    if (!force && [[PSMTabDragAssistant sharedDragAssistant] isDragging]) {
+        ILog(@"Skip sanity check during drag from callsite %@", callsite);
         return;
     }
     if (self.tabView.tabViewItems.count != self.cells.count) {
@@ -239,6 +246,7 @@ const NSInteger kPSMStartResizeAnimation = 0;
                 [self sanityCheckFailedWithCallsite:callsite reason:@"cells[i].representedObject != tabView.tabViewItems[i].representedObject"];
             }
         }
+        NSLog(@"Sanity check passed. cells=%@. tabView.tabViewITems=%@", self.cells, self.tabView.tabViewItems);
     }
 }
 
@@ -1266,6 +1274,11 @@ const NSInteger kPSMStartResizeAnimation = 0;
     if ([self lastMouseDownEvent] == nil) {
         return;
     }
+    if (!_haveInitialDragLocation) {
+        _initialDragLocation = [theEvent locationInWindow];
+        _haveInitialDragLocation = YES;
+        return;
+    }
 
     NSPoint currentPoint = [self convertPoint:[theEvent locationInWindow] fromView:nil];
 
@@ -1292,7 +1305,7 @@ const NSInteger kPSMStartResizeAnimation = 0;
     }
 
     NSRect cellFrame;
-    NSPoint trackingStartPoint = [self convertPoint:[[self lastMouseDownEvent] locationInWindow] fromView:nil];
+    NSPoint trackingStartPoint = [self convertPoint:_initialDragLocation fromView:nil];
     PSMTabBarCell *cell = [self cellForPoint:trackingStartPoint cellFrame:&cellFrame];
     if (cell) {
         //check to see if the close button was the target in the clicked cell
@@ -1338,6 +1351,7 @@ const NSInteger kPSMStartResizeAnimation = 0;
 
 - (void)mouseUp:(NSEvent *)theEvent
 {
+    _haveInitialDragLocation = NO;
     if (_resizing) {
         _resizing = NO;
         [[NSCursor arrowCursor] set];
@@ -1509,6 +1523,7 @@ const NSInteger kPSMStartResizeAnimation = 0;
 }
 
 - (BOOL)performDragOperation:(id <NSDraggingInfo>)sender {
+    _haveInitialDragLocation = NO;
     if ([[[sender draggingPasteboard] types] indexOfObject:@"com.iterm2.psm.controlitem"] != NSNotFound ||
         [self _delegateAcceptsSender:sender]) {
         [[PSMTabDragAssistant sharedDragAssistant] performDragOperation:sender];
@@ -1520,6 +1535,7 @@ const NSInteger kPSMStartResizeAnimation = 0;
 }
 
 - (void)draggingSession:(NSDraggingSession *)session endedAtPoint:(NSPoint)aPoint operation:(NSDragOperation)operation {
+    _haveInitialDragLocation = NO;
     if (operation != NSDragOperationNone) {
         [self removeTabForCell:[[PSMTabDragAssistant sharedDragAssistant] draggedCell]];
         [[PSMTabDragAssistant sharedDragAssistant] finishDrag];

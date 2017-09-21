@@ -268,7 +268,9 @@
                 [viewImage unlockFocus];
             }
 
-            if (styleMask | NSBorderlessWindowMask) {
+            if (self.sourceTabBar.tabLocation == PSMTab_LeftTab) {
+                _dragWindowOffset.height += kPSMTabBarControlHeight;
+            } else if (!(styleMask & NSTitledWindowMask)) {
                 _dragWindowOffset.height += 22;
             }
 
@@ -437,17 +439,23 @@
                                  didDropTabViewItem:[[self draggedCell] representedObject]
                                            inTabBar:[self destinationTabBar]];
         }
-        [[self destinationTabBar] sanityCheck:@"destination performDragOperation"];
-        [[self sourceTabBar] sanityCheck:@"source performDragOperation"];
     }
 
     [[NSNotificationCenter defaultCenter] postNotificationName:PSMTabDragDidEndNotification object:nil];
 
+    PSMTabBarControl *destination = [[[self destinationTabBar] retain] autorelease];
+    PSMTabBarControl *source = [[[self sourceTabBar] retain] autorelease];
+
     [self finishDrag];
+
+    [destination sanityCheck:@"destination performDragOperation"];
+    [source sanityCheck:@"source performDragOperation"];
 }
 
 - (void)draggedImageEndedAt:(NSPoint)aPoint operation:(NSDragOperation)operation {
     if ([self isDragging]) {  // means there was not a successful drop (performDragOperation)
+        PSMTabBarControl *destination = [[[self destinationTabBar] retain] autorelease];
+        PSMTabBarControl *source = [[[self sourceTabBar] retain] autorelease];
         id sourceDelegate = [[self sourceTabBar] delegate];
 
         //split off the dragged tab into a new window
@@ -484,7 +492,31 @@
 
                 [[[self sourceTabBar] tabView] removeTabViewItem:[[self draggedCell] representedObject]];
 
+                void (^fixOriginBlock)(void) = nil;
+                switch (self.sourceTabBar.tabLocation) {
+                    case PSMTab_BottomTab: {
+                        NSPoint bottomLeft = control.window.frame.origin;
+                        fixOriginBlock = ^{
+                            [control.window setFrameOrigin:bottomLeft];
+                        };
+                        break;
+                    }
+                    case PSMTab_LeftTab:
+                    case PSMTab_TopTab: {
+                        NSPoint topLeft = control.window.frame.origin;
+                        topLeft.y += control.window.frame.size.height;
+                        fixOriginBlock = ^{
+                            [control.window setFrameTopLeftPoint:topLeft];
+                        };
+                        break;
+                    }
+                }
+
+                // This could cause an already correctly positioned window to resize.
                 [[control tabView] addTabViewItem:[[self draggedCell] representedObject]];
+
+                fixOriginBlock();
+
                 [[control window] makeKeyAndOrderFront:nil];
 
                 if ([sourceDelegate respondsToSelector:@selector(tabView:didDropTabViewItem:inTabBar:)]) {
@@ -494,7 +526,7 @@
                 }
                 [control sanityCheck:@"add dragged tab to new window"];
             } else {
-                NSLog(@"Delegate returned no control to add to.");
+                ELog(@"Delegate returned no control to add to.");
                 [[[self sourceTabBar] cells] insertObject:[self draggedCell] atIndex:[self draggedCellIndex]];
                 [[[self sourceTabBar] window] setAlphaValue:1];  // Make the window visible again.
                 [[[self sourceTabBar] window] orderFront:nil];
@@ -510,6 +542,9 @@
         [[NSNotificationCenter defaultCenter] postNotificationName:PSMTabDragDidEndNotification object:nil];
 
         [self finishDrag];
+
+        [source sanityCheck:@"draggedImageEndedAt - source"];
+        [destination sanityCheck:@"draggedImageEndedAt - destination"];
     }
 }
 

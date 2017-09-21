@@ -18,6 +18,13 @@
 
 @implementation iTermCheapAttributedString
 
+- (NSString *)description {
+    return [NSString stringWithFormat:@"<%@: %p %@>",
+	   NSStringFromClass([self class]),
+	   self,
+	   [[[NSString alloc] initWithCharacters:[self characters] length:[self length]] autorelease]];
+}
+
 - (void)dealloc {
     [_attributes release];
     [_characterData release];
@@ -92,23 +99,31 @@
         _attributedString = cheap;
         return;
     } else if ([_attributedString isKindOfClass:[iTermCheapAttributedString class]]) {
-        [_attributedString release];
+        iTermCheapAttributedString *cheap = [(id)_attributedString autorelease];
         _attributedString = nil;
+        [self appendRealAttributedStringWithText:[NSString stringWithCharacters:cheap.characters length:cheap.length]
+                                      attributes:cheap.attributes];
+        [_string setString:@""];
     }
     if (_characterData.length > 0) {
         [self flushCharacters];
     }
     if (_string.length) {
-        _canUseFastPath = NO;
-        if (!_attributedString) {
-            _attributedString = [[NSMutableAttributedString alloc] init];
-            [_attributedString beginEditing];
-        }
-        [_attributedString appendAttributedString:[NSAttributedString attributedStringWithString:_string
-                                                                                      attributes:_attributes]];
+        [self appendRealAttributedStringWithText:_string attributes:_attributes];
         [_string setString:@""];
     }
 }
+
+- (void)appendRealAttributedStringWithText:(NSString *)string attributes:(NSDictionary *)attributes {
+    _canUseFastPath = NO;
+    if (!_attributedString) {
+        _attributedString = [[NSMutableAttributedString alloc] init];
+        [_attributedString beginEditing];
+    }
+    [_attributedString appendAttributedString:[NSAttributedString attributedStringWithString:string
+                                                                                  attributes:attributes]];
+}
+
 - (id<iTermAttributedString>)attributedString {
     [self build];
     if ([_attributedString isKindOfClass:[NSAttributedString class]]) {
@@ -118,7 +133,13 @@
 }
 
 - (void)appendString:(NSString *)string {
-    if (_zippy) {
+    // Require a string length of 1 to avoid using zippy for combining marks, which core graphics
+    // renders poorly. Zippy still has value for using core graphics for nonascii uncombined characters.
+    BOOL tryZippy = _zippy;
+    if (tryZippy && ![iTermAdvancedSettingsModel lowFiCombiningMarks] && string.length > 1) {
+        tryZippy = NO;
+    }
+    if (tryZippy) {
         NSInteger i;
         for (i = 0; i < string.length; i++) {
             unichar c = [string characterAtIndex:i];

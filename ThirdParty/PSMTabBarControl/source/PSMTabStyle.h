@@ -54,11 +54,14 @@ Protocol to be observed by all style delegate objects.  These objects handle the
 // Should light-tinted controls be used?
 - (BOOL)useLightControls;
 
+- (void)drawPostHocDecorationsOnSelectedCell:(PSMTabBarCell *)cell;
+
 @end
 
 @interface PSMTabBarControl (StyleAccessors)
 
 - (NSMutableArray *)cells;
 - (void)sanityCheck:(NSString *)callsite;
+- (void)sanityCheck:(NSString *)callsite force:(BOOL)force;
 
 @end

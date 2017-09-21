@@ -133,7 +133,14 @@ NSString * const DirectoryLocationDomain = @"DirectoryLocationDomain";
 }
 
 - (NSString *)scriptsPath {
-    return [[self legacyApplicationSupportDirectory] stringByAppendingPathComponent:@"Scripts"];
+    static dispatch_once_t onceToken;
+    NSString *legacyPath = [[self legacyApplicationSupportDirectory] stringByAppendingPathComponent:@"Scripts"];
+    NSString *modernPath = [[self applicationSupportDirectory] stringByAppendingPathComponent:@"Scripts"];
+    static BOOL useLegacy;
+    dispatch_once(&onceToken, ^{
+        useLegacy = [self fileExistsAtPath:legacyPath] && ![self fileExistsAtPath:modernPath];
+    });
+    return useLegacy ? legacyPath : modernPath;
 }
 
 - (NSString *)autolaunchScriptPath {
@@ -196,13 +203,14 @@ NSString * const DirectoryLocationDomain = @"DirectoryLocationDomain";
     return YES;
 }
 
-- (BOOL)fileExistsAtPathLocally:(NSString *)filename
-         additionalNetworkPaths:(NSArray<NSString *> *)additionalNetworkPaths {
+- (BOOL)fileHasForbiddenPrefix:(NSString *)filename
+        additionalNetworkPaths:(NSArray<NSString *> *)additionalNetworkPaths {
     DLog(@"Additional network paths are: %@", additionalNetworkPaths);
     // Augment list of additional paths with nfs automounter mount points.
     NSMutableArray *networkPaths = [[additionalNetworkPaths mutableCopy] autorelease];
     [networkPaths addObjectsFromArray:[[iTermAutoMasterParser sharedInstance] mountpoints]];
-    
+    DLog(@"Including automounter paths, ignoring: %@", networkPaths);
+
     for (NSString *path in networkPaths) {
         if (!path.length) {
             continue;
@@ -212,10 +220,17 @@ NSString * const DirectoryLocationDomain = @"DirectoryLocationDomain";
         }
         if ([filename hasPrefix:path]) {
             DLog(@"Filename %@ has prefix of ignored path %@", filename, path);
-            return NO;
+            return YES;
         }
     }
+    return NO;
+}
 
+- (BOOL)fileExistsAtPathLocally:(NSString *)filename
+         additionalNetworkPaths:(NSArray<NSString *> *)additionalNetworkPaths {
+    if ([self fileHasForbiddenPrefix:filename additionalNetworkPaths:additionalNetworkPaths]) {
+        return NO;
+    }
     struct statfs buf;
     int rc = statfs([filename UTF8String], &buf);
     if (rc != 0 || (buf.f_flags & MNT_LOCAL)) {

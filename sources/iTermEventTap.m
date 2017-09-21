@@ -14,22 +14,15 @@ NSString *const iTermEventTapEventTappedNotification = @"iTermEventTapEventTappe
 
 @implementation iTermEventTap {
     // When using an event tap, these will be non-NULL.
-    CFMachPortRef _eventTapMachPort;
-    CFRunLoopSourceRef _runLoopEventSource;
+    CFMachPortRef _machPort;
+    CFRunLoopSourceRef _eventSource;  // weak
+    CGEventMask _types;
 }
 
-+ (instancetype)sharedInstance {
-    static dispatch_once_t onceToken;
-    static id instance;
-    dispatch_once(&onceToken, ^{
-        instance = [[self alloc] init];
-    });
-    return instance;
-}
-
-- (instancetype)init {
+- (instancetype)initWithEventTypes:(CGEventMask)types {
     self = [super init];
     if (self) {
+        _types = types;
         _observers = [[NSMutableArray alloc] init];
     }
     return self;
@@ -48,7 +41,7 @@ NSString *const iTermEventTapEventTappedNotification = @"iTermEventTapEventTappe
 }
 
 - (NSEvent *)runEventTapHandler:(NSEvent *)event {
-    CGEventRef newEvent = OnTappedEvent(nil, kCGEventKeyDown, [event CGEvent], self);
+    CGEventRef newEvent = iTermEventTapCallback(nil, kCGEventKeyDown, [event CGEvent], self);
     if (newEvent) {
         return [NSEvent eventWithCGEvent:newEvent];
     } else {
@@ -78,7 +71,7 @@ NSString *const iTermEventTapEventTappedNotification = @"iTermEventTapEventTappe
 }
 
 - (BOOL)isEnabled {
-    return _eventTapMachPort != NULL;
+    return _machPort != NULL;
 }
 
 #pragma mark - Private
@@ -98,16 +91,23 @@ NSString *const iTermEventTapEventTappedNotification = @"iTermEventTapEventTappe
  * event will be released by the calling code along with the original event, after
  * the event data has been passed back to the event system.
  */
-static CGEventRef OnTappedEvent(CGEventTapProxy proxy,
-                                CGEventType type,
-                                CGEventRef event,
-                                void *refcon) {
+static CGEventRef iTermEventTapCallback(CGEventTapProxy proxy,
+                                        CGEventType type,
+                                        CGEventRef event,
+                                        void *refcon) {
+    iTermEventTap *eventTap = (id)refcon;
+    return [eventTap eventTapCallbackWithProxy:proxy type:type event:event];
+}
+
+- (CGEventRef)eventTapCallbackWithProxy:(CGEventTapProxy)proxy
+                                   type:(CGEventType)type
+                                  event:(CGEventRef)event {
     DLog(@"Event tap running");
     if (type == kCGEventTapDisabledByTimeout || type == kCGEventTapDisabledByUserInput) {
         DLog(@"Event tap disabled (type is %@)", @(type));
-        if ([[iTermEventTap sharedInstance] isEnabled]) {
+        if ([self isEnabled]) {
             DLog(@"Re-enabling event tap");
-            [[iTermEventTap sharedInstance] reEnable];
+            [self reEnable];
         }
         return NULL;
     }
@@ -115,22 +115,18 @@ static CGEventRef OnTappedEvent(CGEventTapProxy proxy,
         DLog(@"Workspace session not active");
         return event;
     }
-    
-    if (![[iTermEventTap sharedInstance] userIsActive]) {
+
+    if (![self userIsActive]) {
         DLog(@"User not active");
         // Fast user switching has switched to another user, don't do any remapping.
         DLog(@"** not doing any remapping for event %@", [NSEvent eventWithCGEvent:event]);
         return event;
     }
-    
-    id<iTermEventTapRemappingDelegate> delegate = [[iTermEventTap sharedInstance] remappingDelegate];
-    if (delegate) {
-        DLog(@"Calling delegate");
-        event = [delegate remappedEventFromEventTappedWithType:type event:event];
-    }
+
+    event = [self.remappingDelegate remappedEventFromEventTappedWithType:type event:event];
 
     DLog(@"Notifying observers");
-    [[iTermEventTap sharedInstance] postEventToObservers:event type:type];
+    [self postEventToObservers:event type:type];
 
     return event;
 }
@@ -149,7 +145,7 @@ static CGEventRef OnTappedEvent(CGEventTapProxy proxy,
 }
 
 - (void)reEnable {
-    CGEventTapEnable(_eventTapMachPort, true);
+    CGEventTapEnable(_machPort, true);
 }
 
 // Indicates if the user at the keyboard is the same user that owns this process. Used to avoid
@@ -177,11 +173,14 @@ static CGEventRef OnTappedEvent(CGEventTapProxy proxy,
     DLog(@"Stop event tap %@", [NSThread callStackSymbols]);
     assert(self.isEnabled);
     CFRunLoopRemoveSource(CFRunLoopGetCurrent(),
-                          _runLoopEventSource,
+                          _eventSource,
                           kCFRunLoopCommonModes);
-    CFMachPortInvalidate(_eventTapMachPort);  // Switches off the event tap.
-    CFRelease(_eventTapMachPort);
-    _eventTapMachPort = NULL;
+    _eventSource = NULL;
+
+    // Switch off the event taps.
+    CFMachPortInvalidate(_machPort);
+    CFRelease(_machPort);
+    _machPort = NULL;
 }
 
 - (BOOL)startEventTap {
@@ -189,34 +188,82 @@ static CGEventRef OnTappedEvent(CGEventTapProxy proxy,
     assert(!self.isEnabled);
 
     DLog(@"Register event tap.");
-    _eventTapMachPort = CGEventTapCreate(kCGHIDEventTap,
-                                         kCGTailAppendEventTap,
-                                         kCGEventTapOptionDefault,
-                                         (CGEventMaskBit(kCGEventKeyDown) | CGEventMaskBit(kCGEventFlagsChanged)),
-                                         (CGEventTapCallBack)OnTappedEvent,
-                                         self);
-    if (!_eventTapMachPort) {
+    _machPort = CGEventTapCreate(kCGHIDEventTap,
+                                 kCGTailAppendEventTap,
+                                 kCGEventTapOptionDefault,
+                                 _types,
+                                 (CGEventTapCallBack)iTermEventTapCallback,
+                                 self);
+    if (!_machPort) {
         XLog(@"CGEventTapCreate failed");
-        return NO;
+        goto error;
     }
 
     DLog(@"Create runloop source");
-    _runLoopEventSource = CFMachPortCreateRunLoopSource(NULL, _eventTapMachPort, 0);
-    if (_runLoopEventSource == NULL) {
-        XLog(@"CFMachPortCreateRunLoopSource failed.");
-        CFRelease(_eventTapMachPort);
-        _eventTapMachPort = NULL;
-        return NO;
+    _eventSource = CFMachPortCreateRunLoopSource(NULL, _machPort, 0);
+    if (_eventSource == NULL) {
+        XLog(@"CFMachPortCreateRunLoopSource for key down failed.");
+        goto error;
     }
 
     DLog(@"Adding run loop source.");
     // Get the CFRunLoop primitive for the Carbon Main Event Loop, and add the new event souce
     CFRunLoopAddSource(CFRunLoopGetCurrent(),
-                       _runLoopEventSource,
+                       _eventSource,
                        kCFRunLoopCommonModes);
-    CFRelease(_runLoopEventSource);
+    CFRelease(_eventSource);
 
     return YES;
+
+error:
+    if (_eventSource) {
+        CFRelease(_eventSource);
+        _eventSource = NULL;
+    }
+    if (_machPort) {
+        CFMachPortInvalidate(_machPort);
+        CFRelease(_machPort);
+        _machPort = NULL;
+    }
+    return NO;
+
+}
+
+@end
+
+@interface iTermFlagsChangedEventTap()<iTermEventTapRemappingDelegate>
+@end
+
+@implementation iTermFlagsChangedEventTap
+
++ (instancetype)sharedInstance {
+    static dispatch_once_t onceToken;
+    static id instance;
+    dispatch_once(&onceToken, ^{
+        instance = [[iTermFlagsChangedEventTap alloc] initPrivate];
+    });
+    return instance;
+}
+
+- (instancetype)initPrivate {
+    self = [super initWithEventTypes:CGEventMaskBit(kCGEventFlagsChanged)];
+    if (self) {
+        self.remappingDelegate = self;
+    }
+    return self;
+}
+
+- (void)setRemappingDelegate:(id<iTermEventTapRemappingDelegate>)remappingDelegate {
+    if (remappingDelegate == nil) {
+        remappingDelegate = self;
+    }
+    [super setRemappingDelegate:remappingDelegate];
+}
+
+#pragma mark - iTermEventTapRemappingDelegate
+
+- (CGEventRef)remappedEventFromEventTappedWithType:(CGEventType)type event:(CGEventRef)event {
+    return event;
 }
 
 @end

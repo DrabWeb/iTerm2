@@ -29,6 +29,8 @@ extern NSString *const kCurrentSessionDidChange;
 
 extern NSString *const iTermDidDecodeWindowRestorableStateNotification;
 
+extern NSString *const iTermTabDidChangePositionInWindowNotification;
+
 // This class is 1:1 with windows. It controls the tabs, the window's fulscreen
 // status, and coordinates resizing of sessions (either session-initiated
 // or window-initiated).
@@ -273,6 +275,11 @@ extern NSString *const iTermDidDecodeWindowRestorableStateNotification;
 // Change split selection mode for all sessions in this window.
 - (void)setSplitSelectionMode:(BOOL)mode excludingSession:(PTYSession *)session move:(BOOL)move;
 
+- (PTYSession *)splitVertically:(BOOL)isVertical
+                         before:(BOOL)before
+                        profile:(Profile *)theBookmark
+                  targetSession:(PTYSession *)targetSession;
+
 // Change visibility of menu bar (but only if it should be changed--may do
 // nothing if the menu bar is on a different screen, for example).
 - (void)hideMenuBar;
@@ -337,6 +344,8 @@ extern NSString *const iTermDidDecodeWindowRestorableStateNotification;
 
 // Returns a restorable session that will restore the split pane, tab, or window, as needed.
 - (iTermRestorableSession *)restorableSessionForSession:(PTYSession *)session;
+
+- (PTYSession*)newSessionWithBookmark:(Profile*)bookmark;
 
 @end
 

@@ -1,6 +1,5 @@
 #import "PTYTextView.h"
 
-#import "AsyncHostLookupController.h"
 #import "charmaps.h"
 #import "FileTransferManager.h"
 #import "FontSizeEstimator.h"
@@ -96,10 +95,6 @@ static const NSUInteger kDragPaneModifiers = (NSAlternateKeyMask | NSCommandKeyM
 static const NSUInteger kRectangularSelectionModifiers = (NSCommandKeyMask | NSAlternateKeyMask);
 static const NSUInteger kRectangularSelectionModifierMask = (kRectangularSelectionModifiers | NSControlKeyMask);
 
-// Notifications posted when hostname lookups finish. Notifications are used to
-// avoid dangling references.
-static NSString *const kHostnameLookupFailed = @"kHostnameLookupFailed";
-static NSString *const kHostnameLookupSucceeded = @"kHostnameLookupSucceeded";
 static PTYTextView *gCurrentKeyEventTextView;  // See comment in -keyDown:
 
 // Minimum distance that the mouse must move before a cmd+drag will be
@@ -119,15 +114,12 @@ static const int kDragThreshold = 3;
     NSMenuDelegate,
     NSPopoverDelegate>
 
-// Set the hostname this view is currently waiting for AsyncHostLookupController to finish looking
-// up.
-@property(nonatomic, copy) NSString *currentUnderlineHostname;
 @property(nonatomic, retain) iTermSelection *selection;
 @property(nonatomic, retain) iTermSemanticHistoryController *semanticHistoryController;
 @property(nonatomic, retain) iTermFindCursorView *findCursorView;
 @property(nonatomic, retain) NSWindow *findCursorWindow;  // For find-cursor animation
 @property(nonatomic, retain) iTermQuickLookController *quickLookController;
-@property(strong, readwrite, nullable) NSTouchBar *touchBar;
+@property(strong, readwrite, nullable) NSTouchBar *touchBar NS_AVAILABLE_MAC(10_12_2);
 
 // Set when a context menu opens, nilled when it closes. If the data source changes between when we
 // ask the context menu to open and when the main thread enters a tracking runloop, the text under
@@ -310,14 +302,6 @@ static const int kDragThreshold = 3;
                                                      name:kPointerPrefsChangedNotification
                                                    object:nil];
         [[NSNotificationCenter defaultCenter] addObserver:self
-                                                 selector:@selector(hostnameLookupFailed:)
-                                                     name:kHostnameLookupFailed
-                                                   object:nil];
-        [[NSNotificationCenter defaultCenter] addObserver:self
-                                                 selector:@selector(hostnameLookupSucceeded:)
-                                                     name:kHostnameLookupSucceeded
-                                                   object:nil];
-        [[NSNotificationCenter defaultCenter] addObserver:self
                                                  selector:@selector(imageDidLoad:)
                                                      name:iTermImageDidLoad
                                                    object:nil];
@@ -400,10 +384,6 @@ static const int kDragThreshold = 3;
     [threeFingerTapGestureRecognizer_ disconnectTarget];
     [threeFingerTapGestureRecognizer_ release];
 
-    if (self.currentUnderlineHostname) {
-        [[AsyncHostLookupController sharedInstance] cancelRequestForHostname:self.currentUnderlineHostname];
-    }
-    [_currentUnderlineHostname release];
     _indicatorsHelper.delegate = nil;
     [_indicatorsHelper release];
     _selectionScrollHelper.delegate = nil;
@@ -718,13 +698,16 @@ static const int kDragThreshold = 3;
     _secondaryFont.boldItalicVersion = [_secondaryFont computedBoldItalicVersion];
 
     [self updateMarkedTextAttributes];
-    [self setNeedsDisplay:YES];
 
     NSScrollView* scrollview = [self enclosingScrollView];
     [scrollview setLineScroll:[self lineHeight]];
     [scrollview setPageScroll:2 * [self lineHeight]];
     [self updateNoteViewFrames];
     [_delegate textViewFontDidChange];
+
+    // Refresh to avoid drawing before and after resize.
+    [self refresh];
+    [self setNeedsDisplay:YES];
 }
 
 - (void)changeFont:(id)fontManager
@@ -1112,7 +1095,6 @@ static const int kDragThreshold = 3;
     // Draw the cursor filled in when we're inactive if there's a popup open or key focus was stolen.
     _drawingHelper.shouldDrawFilledInCursor = ([self.delegate textViewShouldDrawFilledInCursor] || _keyFocusStolenCount);
     _drawingHelper.isFrontTextView = (self == [[iTermController sharedInstance] frontTextView]);
-    _drawingHelper.haveUnderlinedHostname = (self.currentUnderlineHostname != nil);
     _drawingHelper.transparencyAlpha = [self transparencyAlpha];
     _drawingHelper.now = [NSDate timeIntervalSinceReferenceDate];
     _drawingHelper.drawMarkIndicators = [_delegate textViewShouldShowMarkIndicators];
@@ -1127,7 +1109,10 @@ static const int kDragThreshold = 3;
     _drawingHelper.copyMode = _delegate.textViewCopyMode;
     _drawingHelper.copyModeSelecting = _delegate.textViewCopyModeSelecting;
     _drawingHelper.copyModeCursorCoord = _delegate.textViewCopyModeCursorCoord;
+    _drawingHelper.passwordInput = _delegate.textViewPasswordInput;
 
+    DLog(@"drawing document visible rect %@", NSStringFromRect(self.enclosingScrollView.documentVisibleRect));
+    
     const NSRect *rectArray;
     NSInteger rectCount;
     [self getRectsBeingDrawn:&rectArray count:&rectCount];
@@ -1654,6 +1639,10 @@ static const int kDragThreshold = 3;
         // Prefer to report the scroll than to send arrow keys in this mouse reporting mode.
         return NO;
     }
+    if (event.modifierFlags & NSEventModifierFlagOption) {
+        // Hold alt to disable sending arrow keys.
+        return NO;
+    }
     BOOL alternateMouseScroll = [iTermAdvancedSettingsModel alternateMouseScroll];
     NSString *upString = [iTermAdvancedSettingsModel alternateMouseScrollStringForUp];
     NSString *downString = [iTermAdvancedSettingsModel alternateMouseScrollStringForDown];
@@ -1762,10 +1751,6 @@ static const int kDragThreshold = 3;
     }
     _drawingHelper.underlinedRange =
         VT100GridAbsWindowedRangeMake(VT100GridAbsCoordRangeMake(-1, -1, -1, -1), 0, 0);
-    if (self.currentUnderlineHostname) {
-        [[AsyncHostLookupController sharedInstance] cancelRequestForHostname:self.currentUnderlineHostname];
-    }
-    self.currentUnderlineHostname = nil;
     [self setNeedsDisplay:YES];  // It would be better to just display the underlined/formerly underlined area.
 }
 
@@ -1799,29 +1784,9 @@ static const int kDragThreshold = 3;
 
                 if (action.actionType == kURLActionOpenURL) {
                     NSURL *url = [NSURL URLWithUserSuppliedString:action.string];
-                    if (![url.host isEqualToString:self.currentUnderlineHostname]) {
-                        if (self.currentUnderlineHostname) {
-                            [[AsyncHostLookupController sharedInstance] cancelRequestForHostname:self.currentUnderlineHostname];
-                        }
-                        if (url && url.host) {
-                            self.currentUnderlineHostname = url.host;
-                            [[AsyncHostLookupController sharedInstance] getAddressForHost:url.host
-                                                                               completion:^(BOOL ok, NSString *hostname) {
-                                                                                   if (!ok) {
-                                                                                       [[NSNotificationCenter defaultCenter] postNotificationName:kHostnameLookupFailed
-                                                                                                                                           object:hostname];
-                                                                                   } else {
-                                                                                       [[NSNotificationCenter defaultCenter] postNotificationName:kHostnameLookupSucceeded
-                                                                                                                                           object:hostname];
-                                                                                   }
-                                                                               }];
-                        }
+                    if (url && url.host) {
+                        [self setNeedsDisplay:YES];
                     }
-                } else {
-                    if (self.currentUnderlineHostname) {
-                        [[AsyncHostLookupController sharedInstance] cancelRequestForHostname:self.currentUnderlineHostname];
-                    }
-                    self.currentUnderlineHostname = nil;
                 }
             } else {
                 [self removeUnderline];
@@ -2837,6 +2802,7 @@ static double EuclideanDistance(NSPoint p1, NSPoint p2) {
 
 
 - (void)quickLookWithEvent:(NSEvent *)event {
+    DLog(@"Quick look with event %@\n%@", event, [NSThread callStackSymbols]);
     NSPoint clickPoint = [self clickPoint:event allowRightMarginOverflow:YES];
     URLAction *urlAction = [self urlActionForClickAtX:clickPoint.x y:clickPoint.y];
     if (!urlAction && [iTermAdvancedSettingsModel performDictionaryLookupOnQuickLook]) {
@@ -3531,9 +3497,10 @@ static double EuclideanDistance(NSPoint p1, NSPoint p2) {
     }
     [pboard declareTypes:types owner:self];
     if (copyAttributedString) {
-        NSData *RTFData = [copyAttributedString RTFFromRange:NSMakeRange(0, [copyAttributedString length])
-                                          documentAttributes:@{}];
-        [pboard setData:RTFData forType:NSRTFPboardType];
+        // I used to convert this to RTF data using
+        // RTFFromRange:documentAttributes: but images wouldn't paste right.
+        [pboard clearContents];
+        [pboard writeObjects:@[ copyAttributedString ]];
     }
     // I used to do
     //   [pboard setString:[copyAttributedString string] forType:NSStringPboardType]
@@ -3692,10 +3659,11 @@ static double EuclideanDistance(NSPoint p1, NSPoint p2) {
         [item action]==@selector(addNote:) ||
         [item action]==@selector(copy:) ||
         [item action]==@selector(copyWithStyles:) ||
-        [item action]==@selector(pasteSelection:) ||
         ([item action]==@selector(print:) && [item tag] == 1)) { // print selection
         // These commands are allowed only if there is a selection.
         return [_selection hasSelection];
+    } else if ([item action]==@selector(pasteSelection:)) {
+        return [[iTermController sharedInstance] lastSelection] != nil;
     } else if ([item action]==@selector(selectOutputOfLastCommand:)) {
         return [_delegate textViewCanSelectOutputOfLastCommand];
     } else if ([item action]==@selector(selectCurrentCommand:)) {
@@ -3753,7 +3721,8 @@ static double EuclideanDistance(NSPoint p1, NSPoint p2) {
               @(kOpenUrlContextMenuAction): NSStringFromSelector(@selector(contextMenuActionOpenURL:)),
               @(kRunCommandContextMenuAction): NSStringFromSelector(@selector(contextMenuActionRunCommand:)),
               @(kRunCoprocessContextMenuAction): NSStringFromSelector(@selector(contextMenuActionRunCoprocess:)),
-              @(kSendTextContextMenuAction): NSStringFromSelector(@selector(contextMenuActionSendText:)) };
+              @(kSendTextContextMenuAction): NSStringFromSelector(@selector(contextMenuActionSendText:)),
+              @(kRunCommandInWindowContextMenuAction): NSStringFromSelector(@selector(contextMenuActionRunCommandInWindow:)) };
 }
 
 - (SEL)selectorForSmartSelectionAction:(NSDictionary *)action {
@@ -3833,13 +3802,18 @@ static double EuclideanDistance(NSPoint p1, NSPoint p2) {
     }
 }
 
-- (void)contextMenuActionRunCommand:(id)sender
-{
+- (void)contextMenuActionRunCommand:(id)sender {
     NSString *command = [sender representedObject];
-    NSLog(@"Run command: %@", command);
+    ELog(@"Run command: %@", command);
     [NSThread detachNewThreadSelector:@selector(runCommand:)
                              toTarget:[self class]
                            withObject:command];
+}
+
+- (void)contextMenuActionRunCommandInWindow:(id)sender {
+    NSString *command = [sender representedObject];
+    ELog(@"Run command in window: %@", command);
+    [[iTermController sharedInstance] openSingleUseWindowWithCommand:command];
 }
 
 + (void)runCommand:(NSString *)command
@@ -4004,7 +3978,7 @@ static double EuclideanDistance(NSPoint p1, NSPoint p2) {
         }
         case kPTYTextViewSelectionExtensionUnitWord: {
             VT100GridWindowedRange rangeWithWordBeforeStart =
-                [extractor rangeForWordAt:coordBeforeStart maximumLength:kUnlimitedMaximumWordLength];
+                [extractor rangeForWordAt:coordBeforeStart maximumLength:kLongMaximumWordLength];
             rangeWithWordBeforeStart.coordRange.end = existingRange.coordRange.end;
             rangeWithWordBeforeStart.columnWindow = existingRange.columnWindow;
             return rangeWithWordBeforeStart;
@@ -4057,7 +4031,7 @@ static double EuclideanDistance(NSPoint p1, NSPoint p2) {
             BOOL startWasOnNull = [extractor characterAt:startCoord].code == 0;
             VT100GridWindowedRange rangeExcludingWordAtStart = existingRange;
             rangeExcludingWordAtStart.coordRange.start =
-            [extractor rangeForWordAt:startCoord  maximumLength:kUnlimitedMaximumWordLength].coordRange.end;
+            [extractor rangeForWordAt:startCoord  maximumLength:kLongMaximumWordLength].coordRange.end;
             // If the start of range moved from a null to a null, skip to the end of the line or past all the nulls.
             if (startWasOnNull &&
                 [extractor characterAt:rangeExcludingWordAtStart.coordRange.start].code == 0) {
@@ -4102,7 +4076,7 @@ static double EuclideanDistance(NSPoint p1, NSPoint p2) {
         case kPTYTextViewSelectionExtensionUnitWord: {
             VT100GridWindowedRange rangeExcludingWordAtEnd = existingRange;
             rangeExcludingWordAtEnd.coordRange.end =
-            [extractor rangeForWordAt:coordBeforeEnd maximumLength:kUnlimitedMaximumWordLength].coordRange.start;
+            [extractor rangeForWordAt:coordBeforeEnd maximumLength:kLongMaximumWordLength].coordRange.start;
             rangeExcludingWordAtEnd.columnWindow = existingRange.columnWindow;
             return rangeExcludingWordAtEnd;
         }
@@ -4150,9 +4124,9 @@ static double EuclideanDistance(NSPoint p1, NSPoint p2) {
         case kPTYTextViewSelectionExtensionUnitWord: {
             VT100GridWindowedRange rangeWithWordAfterEnd;
             if (endCoord.x > VT100GridRangeMax(existingRange.columnWindow)) {
-                rangeWithWordAfterEnd = [extractor rangeForWordAt:coordAfterEnd maximumLength:kUnlimitedMaximumWordLength];
+                rangeWithWordAfterEnd = [extractor rangeForWordAt:coordAfterEnd maximumLength:kLongMaximumWordLength];
             } else {
-                rangeWithWordAfterEnd = [extractor rangeForWordAt:endCoord maximumLength:kUnlimitedMaximumWordLength];
+                rangeWithWordAfterEnd = [extractor rangeForWordAt:endCoord maximumLength:kLongMaximumWordLength];
             }
             rangeWithWordAfterEnd.coordRange.start = existingRange.coordRange.start;
             rangeWithWordAfterEnd.columnWindow = existingRange.columnWindow;
@@ -4440,41 +4414,8 @@ static double EuclideanDistance(NSPoint p1, NSPoint p2) {
     [panel setExtensionHidden:NO];
 
     if ([panel runModal] == NSModalResponseOK) {
-        NSBitmapImageFileType fileType = NSPNGFileType;
         NSString *filename = [panel legacyFilename];
-        if ([filename hasSuffix:@".bmp"]) {
-            fileType = NSBMPFileType;
-        } else if ([filename hasSuffix:@".gif"]) {
-            fileType = NSGIFFileType;
-        } else if ([filename hasSuffix:@".jp2"]) {
-            fileType = NSJPEG2000FileType;
-        } else if ([filename hasSuffix:@".jpg"] || [filename hasSuffix:@".jpeg"]) {
-            fileType = NSJPEGFileType;
-        } else if ([filename hasSuffix:@".png"]) {
-            fileType = NSPNGFileType;
-        } else if ([filename hasSuffix:@".tiff"]) {
-            fileType = NSTIFFFileType;
-        }
-
-        NSData *data = nil;
-        NSDictionary *universalTypeToCocoaMap = @{ (NSString *)kUTTypeBMP: @(NSBMPFileType),
-                                                   (NSString *)kUTTypeGIF: @(NSGIFFileType),
-                                                   (NSString *)kUTTypeJPEG2000: @(NSJPEG2000FileType),
-                                                   (NSString *)kUTTypeJPEG: @(NSJPEGFileType),
-                                                   (NSString *)kUTTypePNG: @(NSPNGFileType),
-                                                   (NSString *)kUTTypeTIFF: @(NSTIFFFileType) };
-        NSString *imageType = imageInfo.imageType;
-        if (imageType) {
-            NSNumber *nsTypeNumber = universalTypeToCocoaMap[imageType];
-            if (nsTypeNumber.integerValue == fileType) {
-                data = imageInfo.data;
-            }
-        }
-        if (!data) {
-            NSBitmapImageRep *rep = [imageInfo.image.images.firstObject bitmapImageRep];
-            data = [rep representationUsingType:fileType properties:@{}];
-        }
-        [data writeToFile:filename atomically:NO];
+        [imageInfo saveToFile:filename];
     }
 }
 
@@ -4492,7 +4433,7 @@ static double EuclideanDistance(NSPoint p1, NSPoint p2) {
     iTermImageInfo *imageInfo = [sender representedObject];
     NSString *name = imageInfo.nameForNewSavedTempFile;
     if (name) {
-        [[NSWorkspace sharedWorkspace] openFile:name];
+        [[iTermLaunchServices sharedInstance] openFile:name];
     }
 }
 
@@ -4634,15 +4575,28 @@ static double EuclideanDistance(NSPoint p1, NSPoint p2) {
     iTermImageInfo *imageInfo = [self imageInfoAtCoord:coord];
     if (imageInfo) {
         // Show context menu for an image.
-        NSArray *entryDicts =
-            @[ @{ @"title": @"Save Image As…",
-                  @"selector": @"saveImageAs:" },
-               @{ @"title": @"Copy Image",
-                  @"selector": @"copyImage:" },
-               @{ @"title": @"Open Image",
-                  @"selector": @"openImage:" },
-               @{ @"title": @"Inspect",
-                  @"selector": @"inspectImage:" } ];
+        NSArray *entryDicts;
+        if (imageInfo.broken) {
+            entryDicts =
+                @[ @{ @"title": @"Save File As…",
+                      @"selector": @"saveImageAs:" },
+                   @{ @"title": @"Copy File",
+                      @"selector": @"copyImage:" },
+                   @{ @"title": @"Open File",
+                      @"selector": @"openImage:" },
+                   @{ @"title": @"Inspect",
+                      @"selector": @"inspectImage:" } ];
+        } else {
+            entryDicts =
+                @[ @{ @"title": @"Save Image As…",
+                      @"selector": @"saveImageAs:" },
+                   @{ @"title": @"Copy Image",
+                      @"selector": @"copyImage:" },
+                   @{ @"title": @"Open Image",
+                      @"selector": @"openImage:" },
+                   @{ @"title": @"Inspect",
+                      @"selector": @"inspectImage:" } ];
+        }
         if (imageInfo.animated || imageInfo.paused) {
             NSString *selector = @"togglePauseAnimatingImage:";
             if (imageInfo.paused) {
@@ -5517,9 +5471,13 @@ static double EuclideanDistance(NSPoint p1, NSPoint p2) {
           totalScrollbackOverflow:[_dataSource totalScrollbackOverflow]];
 }
 
-- (void)clearHighlights {
+- (void)clearHighlights:(BOOL)resetContext {
     [_findOnPageHelper clearHighlights];
-    [_findOnPageHelper resetCopiedFindContext];
+    if (resetContext) {
+        [_findOnPageHelper resetCopiedFindContext];
+    } else {
+        [_findOnPageHelper removeAllSearchResults];
+    }
 }
 
 - (void)setTransparency:(double)fVal {
@@ -5562,11 +5520,18 @@ static double EuclideanDistance(NSPoint p1, NSPoint p2) {
 // service stuff
 - (id)validRequestorForSendType:(NSString *)sendType returnType:(NSString *)returnType
 {
-    if (sendType != nil && [sendType isEqualToString: NSStringPboardType]) {
-        return self;
+    NSSet *acceptedReturnTypes = [NSSet setWithArray:@[ (NSString *)kUTTypeUTF8PlainText,
+                                                        NSStringPboardType ]];
+    NSSet *acceptedSendTypes = nil;
+    if (self._haveShortSelection) {
+        acceptedSendTypes = acceptedReturnTypes;
     }
-
-    return ([super validRequestorForSendType: sendType returnType: returnType]);
+    if ((sendType == nil || [acceptedSendTypes containsObject:sendType]) &&
+        (returnType == nil || [acceptedReturnTypes containsObject:returnType])) {
+        return self;
+    } else {
+        return nil;
+    }
 }
 
 // Service
@@ -5589,9 +5554,14 @@ static double EuclideanDistance(NSPoint p1, NSPoint p2) {
 }
 
 // Service
-- (BOOL)readSelectionFromPasteboard:(NSPasteboard *)pboard
-{
-    return NO;
+- (BOOL)readSelectionFromPasteboard:(NSPasteboard *)pboard {
+    NSString *string = [pboard stringForType:NSStringPboardType];
+    if (string.length) {
+        [_delegate insertText:string];
+        return YES;
+    } else {
+        return NO;
+    }
 }
 
 // This textview is about to be hidden behind another tab.
@@ -5799,7 +5769,7 @@ static double EuclideanDistance(NSPoint p1, NSPoint p2) {
     if (respectDividers) {
         [extractor restrictToLogicalWindowIncludingCoord:coord];
     }
-    VT100GridWindowedRange range = [extractor rangeForWordAt:coord  maximumLength:kUnlimitedMaximumWordLength];
+    VT100GridWindowedRange range = [extractor rangeForWordAt:coord  maximumLength:kLongMaximumWordLength];
     if (rangePtr) {
         *rangePtr = range;
     }
@@ -6171,23 +6141,6 @@ static double EuclideanDistance(NSPoint p1, NSPoint p2) {
                                        pathFactory:^SCPPath *(NSString *path, int line) {
                                            return [_dataSource scpPathForFile:path onLine:line];
                                        }];
-}
-
-- (void)hostnameLookupFailed:(NSNotification *)notification {
-    if ([[notification object] isEqualToString:self.currentUnderlineHostname]) {
-        self.currentUnderlineHostname = nil;
-        [self removeUnderline];
-        _drawingHelper.underlinedRange =
-            VT100GridAbsWindowedRangeMake(VT100GridAbsCoordRangeMake(-1, -1, -1, -1), 0, 0);
-        [self setNeedsDisplay:YES];
-    }
-}
-
-- (void)hostnameLookupSucceeded:(NSNotification *)notification {
-    if ([[notification object] isEqualToString:self.currentUnderlineHostname]) {
-        self.currentUnderlineHostname = nil;
-        [self setNeedsDisplay:YES];
-    }
 }
 
 - (void)imageDidLoad:(NSNotification *)notification {
@@ -6579,6 +6532,7 @@ static double EuclideanDistance(NSPoint p1, NSPoint p2) {
             if (range.length > 0) {
                 foundDirty = YES;
                 [_findOnPageHelper removeHighlightsInRange:NSMakeRange(y + totalScrollbackOverflow, 1)];
+                [_findOnPageHelper removeSearchResultsInRange:NSMakeRange(y + totalScrollbackOverflow, 1)];
                 [self setNeedsDisplayOnLine:y inRange:range];
             }
         }
@@ -6740,14 +6694,17 @@ static double EuclideanDistance(NSPoint p1, NSPoint p2) {
 #pragma mark - iTermSelectionDelegate
 
 - (void)selectionDidChange:(iTermSelection *)selection {
-    if ([selection hasSelection]) {
-        _selectionTime = [[NSDate date] timeIntervalSince1970];
-    } else {
-        _selectionTime = 0;
-    }
     [_delegate refresh];
-    DLog(@"Update selection time to %lf. selection=%@. stack=%@",
-         (double)_selectionTime, selection, [NSThread callStackSymbols]);
+    if (!_selection.live && selection.hasSelection) {
+        const NSInteger MAX_SELECTION_SIZE = 10 * 1000 * 1000;
+        NSString *selection = [self selectedTextWithCappedAtSize:MAX_SELECTION_SIZE minimumLineNumber:0];
+        if (selection.length == MAX_SELECTION_SIZE) {
+            selection = nil;
+        }
+        [[iTermController sharedInstance] setLastSelection:selection];
+    }
+    DLog(@"Selection did change: selection=%@. stack=%@",
+         selection, [NSThread callStackSymbols]);
 }
 
 - (VT100GridRange)selectionRangeOfTerminalNullsOnLine:(int)lineNumber {
@@ -6790,7 +6747,8 @@ static double EuclideanDistance(NSPoint p1, NSPoint p2) {
         [extractor restrictToLogicalWindowIncludingCoord:coord];
     }
     return [extractor rangeForWrappedLineEncompassing:coord
-                                 respectContinuations:NO];
+                                 respectContinuations:NO
+                                             maxChars:-1];
 }
 
 - (int)selectionViewportWidth {

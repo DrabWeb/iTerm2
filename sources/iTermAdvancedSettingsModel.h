@@ -161,7 +161,6 @@
 + (BOOL)useColorfgbgFallback;
 + (BOOL)promptForPasteWhenNotAtPrompt;
 + (void)setPromptForPasteWhenNotAtPrompt:(BOOL)value;
-+ (BOOL)performDNSLookups;
 + (BOOL)zeroWidthSpaceAdvancesCursor;
 + (BOOL)darkThemeHasBlackTitlebar;
 + (BOOL)fontChangeAffectsBroadcastingSessions;
@@ -185,5 +184,13 @@
 + (NSString *)autoLogFormat;
 + (BOOL)killSessionsOnLogout;
 + (BOOL)tmuxUsesDedicatedProfile;
++ (BOOL)detectPasswordInput;
++ (BOOL)disablePasswordManagerAnimations;
++ (BOOL)focusNewSplitPaneWithFocusFollowsMouse;
++ (NSString *)viewManPageCommand;
++ (BOOL)preventEscapeSequenceFromClearingHistory;
++ (BOOL)dwcLineCache;
++ (BOOL)lowFiCombiningMarks;
++ (CGFloat)verticalBarCursorWidth;
 
 @end

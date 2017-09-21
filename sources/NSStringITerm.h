@@ -117,6 +117,8 @@ int decode_utf8_char(const unsigned char * restrict datap,
                       fromCharacterSet:(NSCharacterSet *)charSet
                   charsTakenFromPrefix:(int*)charsTakenFromPrefixPtr;
 
+- (NSArray *)componentsBySplittingStringWithQuotesAndBackslashEscaping:(NSDictionary *)escapes;
+
 // This handles a few kinds of URLs, after trimming whitespace from the beginning and end:
 // 1. Well formed strings like:
 //    "http://example.com/foo?query#fragment"
@@ -211,6 +213,10 @@ int decode_utf8_char(const unsigned char * restrict datap,
                                               unichar simple,
                                               NSString *complexString,
                                               BOOL *stop))block;
+
+// It is safe to modify, delete, or insert characters in `range` within `block`.
+- (void)reverseEnumerateSubstringsEqualTo:(NSString *)query
+                                    block:(void (^)(NSRange range))block;
 
 - (NSUInteger)iterm_unsignedIntegerValue;
 

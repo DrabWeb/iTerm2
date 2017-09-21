@@ -351,7 +351,7 @@
 
 - (NSColor *)textColorForCell:(PSMTabBarCell *)cell {
     NSColor *textColor;
-    if (cell.state == NSOnState) {
+    if (cell.state == NSOnState || [self anyTabHasColor]) {
         if (!cell.tabColor) {
             return [self textColorDefaultSelected:YES];
         } else if ([cell.tabColor brightnessComponent] > 0.2) {
@@ -361,7 +361,13 @@
             textColor = [NSColor whiteColor];
         }
     } else {
-        textColor = [self textColorDefaultSelected:NO];
+        if (cell.tabColor && [self tabColorBrightness:cell] > 0.5) {
+            // This is hard to read when the app is inactive and there's a dark
+            // theme and dark themes give windows dark backgrounds by default.
+            textColor = [NSColor colorWithWhite:0.4 alpha:1];
+        } else {
+            textColor = [self textColorDefaultSelected:NO];
+        }
     }
     return textColor;
 }
@@ -456,18 +462,30 @@
 
     if (tabColor) {
         // Alpha the non-key window's tab colors a bit to make it clearer which window is key.
-        CGFloat alpha = [_tabBar.window isKeyWindow] ? 0.8 : 0.6;
-        
-        // Alpha the inactive tab's colors a bit to make it clear which tab is active.
-        if (selected) {
-            [[tabColor colorWithAlphaComponent:alpha] set];
-            NSRectFillUsingOperation(cellFrame, NSCompositeSourceOver);
+        CGFloat alpha;
+        if ([_tabBar.window isKeyWindow]) {
+            if (selected) {
+                alpha = 1;
+            } else {
+                alpha = 0.4;
+            }
         } else {
-            NSColor *startingColor = [tabColor colorWithAlphaComponent:alpha - 0.2];
-            NSColor *endingColor = [tabColor colorWithAlphaComponent:0];
-            NSGradient *gradient = [[[NSGradient alloc] initWithStartingColor:startingColor endingColor:endingColor] autorelease];
-            [gradient drawInRect:cellFrame angle:-90];
+            if (selected) {
+                alpha = 0.6;
+            } else {
+                alpha = 0.3;
+            }
         }
+        CGFloat components[4];
+        [tabColor getComponents:components];
+        for (int i = 0; i < 3; i++) {
+            components[i] = components[i] * alpha + 0.5 * (1 - alpha);
+        }
+        NSColor *color = [NSColor colorWithColorSpace:tabColor.colorSpace components:components count:4];
+
+        // Alpha the inactive tab's colors a bit to make it clear which tab is active.
+        [color set];
+        NSRectFillUsingOperation(cellFrame, NSCompositeSourceOver);
     }
 
     if (horizontal) {
@@ -531,6 +549,62 @@
     [self drawInteriorWithTabCell:cell inView:[cell controlView] highlightAmount:highlightAmount];
 }
 
+static CGFloat PerceivedBrightness(CGFloat r, CGFloat g, CGFloat b) {
+    static const double kRedComponentBrightness = 0.30;
+    static const double kGreenComponentBrightness = 0.59;
+    static const double kBlueComponentBrightness = 0.11;
+    return (kRedComponentBrightness * r +
+            kGreenComponentBrightness * g +
+            kBlueComponentBrightness * b);
+}
+
+- (CGFloat)tabColorBrightness:(PSMTabBarCell *)cell {
+    if (!cell.tabColor) {
+        return 0.7;
+    }
+    NSColor *tabColor = cell.tabColor;
+    NSColor *safeColor = [tabColor colorUsingColorSpaceName:NSCalibratedRGBColorSpace];
+    CGFloat brightness = PerceivedBrightness([safeColor redComponent],
+                                             [safeColor greenComponent],
+                                             [safeColor blueComponent]);
+    return brightness;
+}
+
+- (BOOL)anyTabHasColor {
+    return [_tabBar.cells indexOfObjectPassingTest:^BOOL(PSMTabBarCell * _Nonnull cell, NSUInteger idx, BOOL * _Nonnull stop) {
+        return cell.tabColor != nil;
+    }] != NSNotFound;
+}
+
+- (void)drawPostHocDecorationsOnSelectedCell:(PSMTabBarCell *)cell {
+    if (self.anyTabHasColor) {
+        const CGFloat brightness = [self tabColorBrightness:cell];
+        NSRect rect = NSInsetRect(cell.frame, -0.5, 0.5);
+        NSBezierPath *path;
+
+        NSColor *outerColor;
+        NSColor *innerColor;
+        const CGFloat alpha = [_tabBar.window isKeyWindow] ? 1 : 0.5;
+        if (brightness > 0.5) {
+            outerColor = [NSColor colorWithWhite:1 alpha:alpha];
+            innerColor = [NSColor colorWithWhite:0 alpha:alpha];
+        } else {
+            outerColor = [NSColor colorWithWhite:0 alpha:alpha];
+            innerColor = [NSColor colorWithWhite:1 alpha:alpha];
+        }
+
+        [outerColor set];
+        path = [NSBezierPath bezierPathWithRect:rect];
+        [path setLineWidth:1];
+        [path stroke];
+
+        [innerColor set];
+        rect = NSInsetRect(rect, 1, 1);
+        path = [NSBezierPath bezierPathWithRect:rect];
+        [path setLineWidth:1];
+        [path stroke];
+    }
+}
 
 - (void)drawInteriorWithTabCell:(PSMTabBarCell *)cell
                          inView:(NSView*)controlView
@@ -778,6 +852,11 @@
                     }
                 }
             }
+        }
+    }
+    for (PSMTabBarCell *cell in [bar cells]) {
+        if (![cell isInOverflowMenu] && NSIntersectsRect([cell frame], rect) && cell.state == NSOnState) {
+            [cell drawPostHocDecorationsOnSelectedCell];
         }
     }
 }

@@ -12,6 +12,8 @@
 #import "DebugLogging.h"
 #import "NSDictionary+iTerm.h"
 #import "NSImage+iTerm.h"
+#import "NSStringITerm.h"
+#import "iTermAdvancedSettingsModel.h"
 #import "iTermColorPresets.h"
 #import "iTermKeyBindingMgr.h"
 #import "iTermRootTerminalView.h"
@@ -35,7 +37,7 @@ static NSString *const iTermTouchBarIdentifierStatus = @"iTermTouchBarIdentifier
 
 ITERM_IGNORE_PARTIAL_BEGIN
 
-@implementation PseudoTerminal (TouchBar) 
+@implementation PseudoTerminal (TouchBar)
 
 - (void)updateTouchBarFunctionKeyLabels {
     if (!IsTouchBarAvailable()) {
@@ -171,7 +173,9 @@ ITERM_IGNORE_PARTIAL_BEGIN
             button.title = word;
             button.imagePosition = NSImageLeft;
             button.enabled = YES;
-            button.keyBindingAction = @{ @"command": [NSString stringWithFormat:@"man %@", [word stringWithEscapedShellCharactersIncludingNewlines:YES]] };
+            NSString *manCommand = [NSString stringWithFormat:[iTermAdvancedSettingsModel viewManPageCommand],
+                                    [word stringWithEscapedShellCharactersIncludingNewlines:YES]];
+            button.keyBindingAction = @{ @"command": manCommand };
         }
     } else if (button.enabled) {
         button.title = @"";
@@ -465,17 +469,7 @@ ITERM_IGNORE_PARTIAL_BEGIN
 - (void)manPageTouchBarItemSelected:(iTermTouchBarButton *)sender {
     NSString *command = sender.keyBindingAction[@"command"];
     if (command) {
-        [[iTermController sharedInstance] launchBookmark:nil
-                                              inTerminal:nil
-                                                 withURL:nil
-                                        hotkeyWindowType:iTermHotkeyWindowTypeNone
-                                                 makeKey:YES
-                                             canActivate:YES
-                                                 command:command
-                                                   block:^PTYSession *(Profile *profile, PseudoTerminal *term) {
-                                                       profile = [profile dictionaryBySettingObject:@"" forKey:KEY_INITIAL_TEXT];
-                                                       return [term createTabWithProfile:profile withCommand:command];
-                                                   }];
+        [[iTermController sharedInstance] openSingleUseWindowWithCommand:command];
     }
 }
 

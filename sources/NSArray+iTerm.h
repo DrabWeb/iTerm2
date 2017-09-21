@@ -17,6 +17,8 @@
 - (NSArray *)mapWithBlock:(id (^)(ObjectType anObject))block;
 - (NSArray *)flatMapWithBlock:(NSArray *(^)(ObjectType anObject))block;
 
+- (id)reduceWithBlock:(id (^)(ObjectType first, ObjectType second))block;
+
 // Returns those elements of the array for which block(element) returns YES.
 // block is called on every element in order.
 - (NSArray *)filteredArrayUsingBlock:(BOOL (^)(ObjectType anObject))block;
@@ -27,6 +29,7 @@
 
 - (BOOL)anyWithBlock:(BOOL (^)(ObjectType anObject))block;
 - (BOOL)allWithBlock:(BOOL (^)(ObjectType anObject))block;
+- (ObjectType)maxWithComparator:(NSComparisonResult (^)(ObjectType a, ObjectType b))comparator;
 
 // Does the array contain at least one object not equal to @c anObject?
 - (BOOL)containsObjectBesides:(ObjectType)anObject;

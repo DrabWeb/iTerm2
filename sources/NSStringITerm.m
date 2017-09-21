@@ -157,11 +157,12 @@
 - (NSArray *)componentsBySplittingStringWithQuotesAndBackslashEscaping:(NSDictionary *)escapes {
     NSMutableArray *result = [NSMutableArray array];
 
-    int inQuotes = 0; // Are we inside double quotes?
+    BOOL inSingleQuotes = NO;
+    BOOL inDoubleQuotes = NO; // Are we inside double quotes?
     BOOL escape = NO;  // Should this char be escaped?
     NSMutableString *currentValue = [NSMutableString string];
-    BOOL valueStarted = NO;
-    BOOL firstCharacterNotQuotedOrEscaped = NO;
+    BOOL isFirstCharacterOfWord = YES;
+    BOOL firstCharacterOfThisWordWasQuoted = YES;
 
     for (NSInteger i = 0; i <= self.length; i++) {
         unichar c;
@@ -174,6 +175,7 @@
         } else {
             // Signifies end-of-string.
             c = 0;
+            escape = NO;
         }
 
         if (c == '\\' && !escape) {
@@ -182,7 +184,7 @@
         }
 
         if (escape) {
-            valueStarted = YES;
+            isFirstCharacterOfWord = NO;
             escape = NO;
             if (escapes[@(c)]) {
                 [currentValue appendString:escapes[@(c)]];
@@ -192,38 +194,43 @@
             continue;
         }
 
-        if (c == '"') {
-            inQuotes = !inQuotes;
-            valueStarted = YES;
+        if (c == '"' && !inSingleQuotes) {
+            inDoubleQuotes = !inDoubleQuotes;
+            isFirstCharacterOfWord = NO;
             continue;
         }
-
+        if (c == '\'' && !inDoubleQuotes) {
+            inSingleQuotes = !inSingleQuotes;
+            isFirstCharacterOfWord = NO;
+            continue;
+        }
         if (c == 0) {
-            inQuotes = NO;
+            inSingleQuotes = NO;
+            inDoubleQuotes = NO;
         }
 
         // Treat end-of-string like whitespace.
         BOOL isWhitespace = (c == 0 || iswspace(c));
 
-        if (!inQuotes && isWhitespace) {
-            if (valueStarted) {
-                if (firstCharacterNotQuotedOrEscaped) {
+        if (!inSingleQuotes && !inDoubleQuotes && isWhitespace) {
+            if (!isFirstCharacterOfWord) {
+                if (!firstCharacterOfThisWordWasQuoted) {
                     [result addObject:[currentValue stringByExpandingTildeInPath]];
                 } else {
                     [result addObject:currentValue];
                 }
                 currentValue = [NSMutableString string];
-                firstCharacterNotQuotedOrEscaped = NO;
-                valueStarted = NO;
+                firstCharacterOfThisWordWasQuoted = YES;
+                isFirstCharacterOfWord = YES;
             }
-            // If !valueStarted, this char is meaningless whitespace.
+            // Ignore whitespace not in quotes or escaped.
             continue;
         }
 
-        if (!valueStarted) {
-            firstCharacterNotQuotedOrEscaped = !inQuotes;
+        if (isFirstCharacterOfWord) {
+            firstCharacterOfThisWordWasQuoted = inDoubleQuotes || inSingleQuotes;
+            isFirstCharacterOfWord = NO;
         }
-        valueStarted = YES;
         [currentValue appendFormat:@"%C", c];
     }
 
@@ -559,7 +566,11 @@ int decode_utf8_char(const unsigned char *datap,
     NSRange rangeOfLastWantedCharacter = [self rangeOfCharacterFromSet:invertedCharset
                                                                options:NSBackwardsSearch];
     if (rangeOfLastWantedCharacter.location == NSNotFound) {
-        return self;
+        if ([self rangeOfCharacterFromSet:charset].location == NSNotFound) {
+            return self;
+        } else {
+            return @"";
+        }
     } else if (rangeOfLastWantedCharacter.location + rangeOfLastWantedCharacter.length < self.length) {
         NSUInteger i = rangeOfLastWantedCharacter.location + rangeOfLastWantedCharacter.length;
         return [self substringToIndex:i];
@@ -864,7 +875,8 @@ int decode_utf8_char(const unsigned char *datap,
 }
 
 - (NSDate *)dateValueFromUTC {
-    NSArray<NSString *> *formats = @[ @"yyyy-MM-dd'T'HH:mm:ss.SSS'Z'",
+    NSArray<NSString *> *formats = @[ @"E, d MMM yyyy HH:mm:ss zzz",
+                                      @"yyyy-MM-dd'T'HH:mm:ss.SSS'Z'",
                                       @"yyyy-MM-dd't'HH:mm:ss.SSS'z'",
                                       @"yyyy-MM-dd'T'HH:mm:ss'Z'",
                                       @"yyyy-MM-dd't'HH:mm:ss'z'",
@@ -1511,6 +1523,15 @@ static TECObjectRef CreateTECConverterForUTF8Variants(TextEncodingVariant varian
         }
         index = NSMaxRange(range);
     } while (NSMaxRange(range) < self.length);
+}
+
+- (void)reverseEnumerateSubstringsEqualTo:(NSString *)query
+                                    block:(void (^)(NSRange range))block {
+    NSRange range = [self rangeOfString:query options:NSBackwardsSearch];
+    while (range.location != NSNotFound) {
+        block(range);
+        range = [self rangeOfString:query options:NSBackwardsSearch range:NSMakeRange(0, range.location)];
+    }
 }
 
 - (NSUInteger)iterm_unsignedIntegerValue {

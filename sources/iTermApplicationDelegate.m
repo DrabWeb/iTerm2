@@ -69,8 +69,10 @@
 #import "iTermToolbeltView.h"
 #import "iTermURLStore.h"
 #import "iTermWarning.h"
+#import "MovePaneController.h"
 #import "NSApplication+iTerm.h"
 #import "NSArray+iTerm.h"
+#import "NSBundle+iTerm.h"
 #import "NSFileManager+iTerm.h"
 #import "NSStringITerm.h"
 #import "NSWindow+iTerm.h"
@@ -84,6 +86,7 @@
 #import "PTYTextView.h"
 #import "PTYWindow.h"
 #import "QLPreviewPanel+iTerm.h"
+#import "TmuxDashboardController.h"
 #import "ToastWindowController.h"
 #import "VT100Terminal.h"
 
@@ -194,6 +197,9 @@ static const NSTimeInterval kOneMonth = 30 * 24 * 60 * 60;
 
     NSArray<NSDictionary *> *_buriedSessionsState;
     NSMutableDictionary<id, ITMNotificationRequest *> *_newSessionSubscriptions;
+    NSMutableDictionary<id, ITMNotificationRequest *> *_terminateSessionSubscriptions;
+    NSMutableDictionary<id, ITMNotificationRequest *> *_layoutChangeSubscriptions;
+    BOOL _layoutChanged;
 }
 
 - (instancetype)init {
@@ -246,6 +252,27 @@ static const NSTimeInterval kOneMonth = 30 * 24 * 60 * 60;
                                                  selector:@selector(sessionCreated:)
                                                      name:PTYSessionCreatedNotification
                                                    object:nil];
+        [[NSNotificationCenter defaultCenter] addObserver:self
+                                                 selector:@selector(sessionCreated:)
+                                                     name:PTYSessionRevivedNotification
+                                                   object:nil];
+        [[NSNotificationCenter defaultCenter] addObserver:self
+                                                 selector:@selector(sessionDidTerminate:)
+                                                     name:PTYSessionTerminatedNotification
+                                                   object:nil];
+        [[NSNotificationCenter defaultCenter] addObserver:self
+                                                 selector:@selector(layoutChanged:)
+                                                     name:iTermSessionDidChangeTabNotification
+                                                   object:nil];
+        [[NSNotificationCenter defaultCenter] addObserver:self
+                                                 selector:@selector(layoutChanged:)
+                                                     name:iTermTabDidChangeWindowNotification
+                                                   object:nil];
+        [[NSNotificationCenter defaultCenter] addObserver:self
+                                                 selector:@selector(layoutChanged:)
+                                                     name:iTermTabDidChangePositionInWindowNotification
+                                                   object:nil];
+
         [[NSAppleEventManager sharedAppleEventManager] setEventHandler:self
                                                            andSelector:@selector(getUrl:withReplyEvent:)
                                                          forEventClass:kInternetEventClass
@@ -263,6 +290,8 @@ static const NSTimeInterval kOneMonth = 30 * 24 * 60 * 60;
     [[[NSWorkspace sharedWorkspace] notificationCenter] removeObserver:self];
     [_appNapStoppingActivity release];
     [_newSessionSubscriptions release];
+    [_layoutChangeSubscriptions release];
+    [_terminateSessionSubscriptions release];
     [super dealloc];
 }
 
@@ -284,7 +313,9 @@ static const NSTimeInterval kOneMonth = 30 * 24 * 60 * 60;
 }
 
 - (BOOL)validateMenuItem:(NSMenuItem *)menuItem {
-    if ([menuItem action] == @selector(toggleUseBackgroundPatternIndicator:)) {
+    if ([menuItem action] == @selector(openDashboard:)) {
+        return [[iTermController sharedInstance] haveTmuxConnection];
+    } else if ([menuItem action] == @selector(toggleUseBackgroundPatternIndicator:)) {
       [menuItem setState:[self useBackgroundPatternIndicator]];
       return YES;
     } else if ([menuItem action] == @selector(undo:)) {
@@ -709,6 +740,7 @@ static const NSTimeInterval kOneMonth = 30 * 24 * 60 * 60;
     DLog(@"applicationWillTerminate called");
     [[iTermModifierRemapper sharedInstance] setRemapModifiers:NO];
     DLog(@"applicationWillTerminate returning");
+    TurnOffDebugLoggingSilently();
 }
 
 - (BOOL)applicationOpenUntitledFile:(NSApplication *)theApplication {
@@ -1110,6 +1142,30 @@ static const NSTimeInterval kOneMonth = 30 * 24 * 60 * 60;
     }];
 }
 
+- (void)layoutChanged:(NSNotification *)notification {
+    if (!_layoutChanged) {
+        _layoutChanged = YES;
+        dispatch_async(dispatch_get_main_queue(), ^{
+            _layoutChanged = NO;
+            [_layoutChangeSubscriptions enumerateKeysAndObjectsUsingBlock:^(id  _Nonnull key, ITMNotificationRequest * _Nonnull obj, BOOL * _Nonnull stop) {
+                ITMNotification *notification = [[[ITMNotification alloc] init] autorelease];
+                notification.layoutChangedNotification.listSessionsResponse = [self newListSessionsResponse];
+                [[[iTermApplication sharedApplication] delegate] postAPINotification:notification toConnection:key];
+            }];
+        });
+    }
+}
+
+- (void)sessionDidTerminate:(NSNotification *)notification {
+    PTYSession *session = notification.object;
+    [_terminateSessionSubscriptions enumerateKeysAndObjectsUsingBlock:^(id  _Nonnull key, ITMNotificationRequest * _Nonnull obj, BOOL * _Nonnull stop) {
+        ITMNotification *notification = [[[ITMNotification alloc] init] autorelease];
+        notification.terminateSessionNotification = [[[ITMTerminateSessionNotification alloc] init] autorelease];
+        notification.terminateSessionNotification.uniqueIdentifier = session.guid;
+        [[[iTermApplication sharedApplication] delegate] postAPINotification:notification toConnection:key];
+    }];
+}
+
 - (void)getUrl:(NSAppleEventDescriptor *)event withReplyEvent:(NSAppleEventDescriptor *)replyEvent {
     NSString *urlStr = [[event paramDescriptorForKeyword:keyDirectObject] stringValue];
     NSURL *url = [NSURL URLWithString:urlStr];
@@ -1200,9 +1256,7 @@ static const NSTimeInterval kOneMonth = 30 * 24 * 60 * 60;
     }
     [[NSUserDefaults standardUserDefaults] setBool:YES forKey:kHaveAskedAboutBetaKey];
 
-    NSString *testingFeed = [[NSBundle mainBundle] objectForInfoDictionaryKey:@"SUFeedURLForTesting"];
-    const BOOL nightlyChannel = [testingFeed containsString:@"nightly"];
-    if (nightlyChannel) {
+    if ([NSBundle it_isNightlyBuild]) {
         return;
     }
     
@@ -1211,7 +1265,7 @@ static const NSTimeInterval kOneMonth = 30 * 24 * 60 * 60;
         return;
     }
 
-    const BOOL isEarlyAdopter = [testingFeed containsString:@"testing3.xml"];
+    const BOOL isEarlyAdopter = [NSBundle it_isEarlyAdopter];
     if (isEarlyAdopter) {
         // Early adopters who are already beta testers won't get prompted.
         // They are the new "real" beta testers.
@@ -1453,7 +1507,8 @@ static const NSTimeInterval kOneMonth = 30 * 24 * 60 * 60;
 - (void)updateRestoreWindowArrangementsMenu:(NSMenuItem *)menuItem asTabs:(BOOL)asTabs {
     [WindowArrangements refreshRestoreArrangementsMenu:menuItem
                                           withSelector:asTabs ? @selector(restoreWindowArrangementAsTabs:) : @selector(restoreWindowArrangement:)
-                                       defaultShortcut:kRestoreDefaultWindowArrangementShortcut];
+                                       defaultShortcut:kRestoreDefaultWindowArrangementShortcut
+                                            identifier:asTabs ? @"Restore Window Arrangement as Tabs" : @"Restore Window Arrangement"];
 }
 
 - (NSMenu *)topLevelViewNamed:(NSString *)menuName {
@@ -1626,7 +1681,11 @@ static const NSTimeInterval kOneMonth = 30 * 24 * 60 * 60;
 
 - (IBAction)newWindow:(id)sender {
     DLog(@"newWindow: invoked");
-    [[iTermController sharedInstance] newWindow:sender possiblyTmux:[self possiblyTmuxValueForWindow:YES]];
+    BOOL cancel;
+    BOOL tmux = [self possiblyTmuxValueForWindow:YES cancel:&cancel];
+    if (!cancel) {
+        [[iTermController sharedInstance] newWindow:sender possiblyTmux:tmux];
+    }
 }
 
 - (IBAction)newSessionWithSameProfile:(id)sender
@@ -1637,7 +1696,11 @@ static const NSTimeInterval kOneMonth = 30 * 24 * 60 * 60;
 - (IBAction)newSession:(id)sender
 {
     DLog(@"iTermApplicationDelegate newSession:");
-    [[iTermController sharedInstance] newSession:sender possiblyTmux:[self possiblyTmuxValueForWindow:NO]];
+    BOOL cancel;
+    BOOL tmux = [self possiblyTmuxValueForWindow:NO cancel:&cancel];
+    if (!cancel) {
+        [[iTermController sharedInstance] newSession:sender possiblyTmux:tmux];
+    }
 }
 
 - (IBAction)arrangeHorizontally:(id)sender
@@ -1740,8 +1803,10 @@ static const NSTimeInterval kOneMonth = 30 * 24 * 60 * 60;
             switch (restorableSession.group) {
                 case kiTermRestorableSessionGroupSession:
                     // Restore a single session.
+                    DLog(@"Restore a single session");
                     term = [controller terminalWithGuid:restorableSession.terminalGuid];
                     if (term) {
+                        DLog(@"resuse an existing window");
                         // Reuse an existing window
                         tab = [term tabWithUniqueId:restorableSession.tabUniqueId];
                         if (tab) {
@@ -1756,6 +1821,7 @@ static const NSTimeInterval kOneMonth = 30 * 24 * 60 * 60;
                             [term addRevivedSession:restorableSession.sessions[0]];
                         }
                     } else {
+                        DLog(@"Create a new window");
                         // Create a new term and add the session to it.
                         term = [[[PseudoTerminal alloc] initWithSmartLayout:YES
                                                                  windowType:WINDOW_TYPE_NORMAL
@@ -1773,10 +1839,12 @@ static const NSTimeInterval kOneMonth = 30 * 24 * 60 * 60;
 
                 case kiTermRestorableSessionGroupTab:
                     // Restore a tab, possibly with multiple sessions in split panes.
+                    DLog(@"Restore a tab, possibly with multiple sessions in split panes");
                     term = [controller terminalWithGuid:restorableSession.terminalGuid];
                     BOOL fitTermToTabs = NO;
                     if (!term) {
                         // Create a new window
+                        DLog(@"Create a new window");
                         term = [[[PseudoTerminal alloc] initWithSmartLayout:YES
                                                                  windowType:WINDOW_TYPE_NORMAL
                                                             savedWindowType:WINDOW_TYPE_NORMAL
@@ -1786,6 +1854,7 @@ static const NSTimeInterval kOneMonth = 30 * 24 * 60 * 60;
                         fitTermToTabs = YES;
                     }
                     // Add a tab to it.
+                    DLog(@"Add a tab to the window");
                     [term addTabWithArrangement:restorableSession.arrangement
                                        uniqueId:restorableSession.tabUniqueId
                                        sessions:restorableSession.sessions
@@ -1797,6 +1866,7 @@ static const NSTimeInterval kOneMonth = 30 * 24 * 60 * 60;
 
                 case kiTermRestorableSessionGroupWindow:
                     // Restore a widow.
+                    DLog(@"Restore a widow");
                     term = [PseudoTerminal terminalWithArrangement:restorableSession.arrangement
                                                           sessions:restorableSession.sessions
                                           forceOpeningHotKeyWindow:YES];
@@ -1960,6 +2030,10 @@ static const NSTimeInterval kOneMonth = 30 * 24 * 60 * 60;
     [[iTermTipController sharedInstance] showTip];
 }
 
+- (IBAction)openDashboard:(id)sender {
+    [[TmuxDashboardController sharedInstance] showWindow:nil];
+}
+
 #pragma mark - Private
 
 - (void)updateProcessType {
@@ -1986,7 +2060,8 @@ static const NSTimeInterval kOneMonth = 30 * 24 * 60 * 60;
     return [[iTermHotKeyController sharedInstance] profileHotKeyForWindowController:term];
 }
 
-- (BOOL)possiblyTmuxValueForWindow:(BOOL)isWindow {
+- (BOOL)possiblyTmuxValueForWindow:(BOOL)isWindow cancel:(BOOL *)cancel {
+    *cancel = NO;
     static NSString *const kPossiblyTmuxIdentifier = @"NoSyncNewWindowOrTabFromTmuxOpensTmux";
     if ([[[[iTermController sharedInstance] currentTerminal] currentSession] isTmuxClient]) {
         NSString *heading =
@@ -1998,11 +2073,12 @@ static const NSTimeInterval kOneMonth = 30 * 24 * 60 * 60;
                                        isWindow ? @"window" : @"tab"];
         NSString *tmuxAction = isWindow ? @"New tmux Window" : @"New tmux Tab";
         iTermWarningSelection selection = [iTermWarning showWarningWithTitle:title
-                                                                     actions:@[ tmuxAction, @"Use Default Profile" ]
+                                                                     actions:@[ tmuxAction, @"Use Default Profile", @"Cancel" ]
                                                                    accessory:nil
                                                                   identifier:kPossiblyTmuxIdentifier
                                                                  silenceable:kiTermWarningTypePermanentlySilenceable
                                                                      heading:heading];
+        *cancel = (selection == kiTermWarningSelection2);
         return (selection == kiTermWarningSelection0);
     } else {
         return NO;
@@ -2299,19 +2375,31 @@ static const NSTimeInterval kOneMonth = 30 * 24 * 60 * 60;
     }
     if (!_newSessionSubscriptions) {
         _newSessionSubscriptions = [[NSMutableDictionary alloc] init];
+        _terminateSessionSubscriptions = [[NSMutableDictionary alloc] init];
+        _layoutChangeSubscriptions = [[NSMutableDictionary alloc] init];
+    }
+    NSMutableDictionary<id, ITMNotificationRequest *> *subscriptions;
+    if (request.notificationType == ITMNotificationType_NotifyOnNewSession) {
+        subscriptions = _newSessionSubscriptions;
+    } else if (request.notificationType == ITMNotificationType_NotifyOnTerminateSession) {
+        subscriptions = _terminateSessionSubscriptions;
+    } else if (request.notificationType == ITMNotificationType_NotifyOnLayoutChange) {
+        subscriptions = _layoutChangeSubscriptions;
+    } else {
+        assert(false);
     }
     if (request.subscribe) {
-        if (_newSessionSubscriptions[connection]) {
+        if (subscriptions[connection]) {
             response.status = ITMNotificationResponse_Status_AlreadySubscribed;
             return response;
         }
-        _newSessionSubscriptions[connection] = request;
+        subscriptions[connection] = request;
     } else {
-        if (!_newSessionSubscriptions[connection]) {
+        if (!subscriptions[connection]) {
             response.status = ITMNotificationResponse_Status_NotSubscribed;
             return response;
         }
-        [_newSessionSubscriptions removeObjectForKey:connection];
+        [subscriptions removeObjectForKey:connection];
     }
 
     response.status = ITMNotificationResponse_Status_Ok;
@@ -2321,7 +2409,9 @@ static const NSTimeInterval kOneMonth = 30 * 24 * 60 * 60;
 - (void)apiServerNotification:(ITMNotificationRequest *)request
                    connection:(id)connection
                       handler:(void (^)(ITMNotificationResponse *))handler {
-    if (request.notificationType == ITMNotificationType_NotifyOnNewSession) {
+    if (request.notificationType == ITMNotificationType_NotifyOnNewSession ||
+        request.notificationType == ITMNotificationType_NotifyOnTerminateSession |
+        request.notificationType == ITMNotificationType_NotifyOnLayoutChange) {
         handler([self handleAPINotificationRequest:request connection:connection]);
     } else {
         PTYSession *session = [self sessionForAPIIdentifier:request.hasSession ? request.session : nil];
@@ -2400,12 +2490,18 @@ static const NSTimeInterval kOneMonth = 30 * 24 * 60 * 60;
 
 - (void)apiServerListSessions:(ITMListSessionsRequest *)request
                       handler:(void (^)(ITMListSessionsResponse *))handler {
+    handler([self newListSessionsResponse]);
+}
+
+- (ITMListSessionsResponse *)newListSessionsResponse {
     ITMListSessionsResponse *response = [[[ITMListSessionsResponse alloc] init] autorelease];
     for (PseudoTerminal *window in [[iTermController sharedInstance] terminals]) {
         ITMListSessionsResponse_Window *windowMessage = [[[ITMListSessionsResponse_Window alloc] init] autorelease];
+        windowMessage.windowId = window.terminalGuid;
 
         for (PTYTab *tab in window.tabs) {
             ITMListSessionsResponse_Tab *tabMessage = [[[ITMListSessionsResponse_Tab alloc] init] autorelease];
+            tabMessage.tabId = [@(tab.uniqueId) stringValue];
 
             for (PTYSession *session in tab.sessions) {
                 ITMListSessionsResponse_Session *sessionMessage = [[[ITMListSessionsResponse_Session alloc] init] autorelease];
@@ -2418,7 +2514,7 @@ static const NSTimeInterval kOneMonth = 30 * 24 * 60 * 60;
 
         [response.windowsArray addObject:windowMessage];
     }
-    handler(response);
+    return response;
 }
 
 - (void)apiServerSendText:(ITMSendTextRequest *)request handler:(void (^)(ITMSendTextResponse *))handler {
@@ -2432,6 +2528,106 @@ static const NSTimeInterval kOneMonth = 30 * 24 * 60 * 60;
     [session writeTask:request.text];
     ITMSendTextResponse *response = [[[ITMSendTextResponse alloc] init] autorelease];
     response.status = ITMSendTextResponse_Status_Ok;
+    handler(response);
+}
+
+- (void)apiServerCreateTab:(ITMCreateTabRequest *)request handler:(void (^)(ITMCreateTabResponse *))handler {
+    PseudoTerminal *term = nil;
+    if (request.hasWindowId) {
+        term = [[iTermController sharedInstance] terminalWithGuid:request.windowId];
+        if (!term) {
+            ITMCreateTabResponse *response = [[[ITMCreateTabResponse alloc] init] autorelease];
+            response.status = ITMCreateTabResponse_Status_InvalidWindowId;
+            handler(response);
+            return;
+        }
+    }
+
+    Profile *profile = [[ProfileModel sharedInstance] defaultBookmark];
+    if (request.hasProfileName) {
+        profile = [[ProfileModel sharedInstance] bookmarkWithName:request.profileName];
+        if (!profile) {
+            ITMCreateTabResponse *response = [[[ITMCreateTabResponse alloc] init] autorelease];
+            response.status = ITMCreateTabResponse_Status_InvalidProfileName;
+            handler(response);
+            return;
+        }
+    }
+
+    PTYSession *session = [[iTermController sharedInstance] launchBookmark:profile
+                                                                inTerminal:term
+                                                                   withURL:nil
+                                                          hotkeyWindowType:iTermHotkeyWindowTypeNone
+                                                                   makeKey:YES
+                                                               canActivate:YES
+                                                                   command:request.hasCommand ? request.command : nil
+                                                                     block:nil];
+    if (!session) {
+        ITMCreateTabResponse *response = [[[ITMCreateTabResponse alloc] init] autorelease];
+        response.status = ITMCreateTabResponse_Status_MissingSubstitution;
+        handler(response);
+        return;
+    }
+
+    term = [[iTermController sharedInstance] terminalWithSession:session];
+    PTYTab *tab = [term tabForSession:session];
+
+    ITMCreateTabResponse_Status status = ITMCreateTabResponse_Status_Ok;
+
+    if (request.hasTabIndex) {
+        NSInteger sourceIndex = [term indexOfTab:tab];
+        if (term.numberOfTabs > request.tabIndex && sourceIndex != NSNotFound) {
+            [term.tabBarControl moveTabAtIndex:sourceIndex toIndex:request.tabIndex];
+        } else {
+            status = ITMCreateTabResponse_Status_InvalidTabIndex;
+        }
+    }
+
+    ITMCreateTabResponse *response = [[[ITMCreateTabResponse alloc] init] autorelease];
+    response.status = status;
+    response.windowId = term.terminalGuid;
+    response.tabId = tab.uniqueId;
+    response.sessionId = session.guid;
+    handler(response);
+}
+
+- (void)apiServerSplitPane:(ITMSplitPaneRequest *)request handler:(void (^)(ITMSplitPaneResponse *))handler {
+    PTYSession *session = [self sessionForAPIIdentifier:request.hasSession ? request.session : nil];
+    PseudoTerminal *term = session ? [[iTermController sharedInstance] terminalWithSession:session] : nil;
+    if (!term || !session || session.exited) {
+        ITMSplitPaneResponse *response = [[[ITMSplitPaneResponse alloc] init] autorelease];
+        response.status = ITMSplitPaneResponse_Status_SessionNotFound;
+        handler(response);
+        return;
+    }
+
+    Profile *profile = [[ProfileModel sharedInstance] defaultBookmark];
+    if (request.hasProfileName) {
+        profile = [[ProfileModel sharedInstance] bookmarkWithName:request.profileName];
+        if (!profile) {
+            ITMSplitPaneResponse *response = [[[ITMSplitPaneResponse alloc] init] autorelease];
+            response.status = ITMSplitPaneResponse_Status_InvalidProfileName;
+            handler(response);
+            return;
+        }
+    }
+
+    PTYSession *newSession = [term splitVertically:request.splitDirection == ITMSplitPaneRequest_SplitDirection_Vertical
+                                            before:request.before
+                                           profile:profile
+                                     targetSession:session];
+    if (newSession == nil && !session.isTmuxClient) {
+        ITMSplitPaneResponse *response = [[[ITMSplitPaneResponse alloc] init] autorelease];
+        response.status = ITMSplitPaneResponse_Status_CannotSplit;
+        handler(response);
+        return;
+    }
+
+    ITMSplitPaneResponse *response = [[[ITMSplitPaneResponse alloc] init] autorelease];
+    response.status = ITMSplitPaneResponse_Status_Ok;
+    if (newSession != nil) {
+        response.sessionId = newSession.guid;
+    }
     handler(response);
 }
 

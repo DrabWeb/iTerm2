@@ -39,8 +39,10 @@
 #import "iTermShellHistoryController.h"
 #import "iTermShortcut.h"
 #import "iTermShortcutInputView.h"
+#import "iTermSystemVersion.h"
 #import "iTermTextExtractor.h"
 #import "iTermThroughputEstimator.h"
+#import "iTermUpdateCadenceController.h"
 #import "iTermWarning.h"
 #import "MovePaneController.h"
 #import "MovingAverage.h"
@@ -101,6 +103,8 @@ static NSString *const PTYSessionDidRepairSavedArrangement = @"PTYSessionDidRepa
 static NSString *const kAskAboutOutdatedKeyMappingKeyFormat = @"AskAboutOutdatedKeyMappingForGuid%@";
 
 NSString *const PTYSessionCreatedNotification = @"PTYSessionCreatedNotification";
+NSString *const PTYSessionTerminatedNotification = @"PTYSessionTerminatedNotification";
+NSString *const PTYSessionRevivedNotification = @"PTYSessionRevivedNotification";
 
 NSString *const kPTYSessionTmuxFontDidChange = @"kPTYSessionTmuxFontDidChange";
 NSString *const kPTYSessionCapturedOutputDidChange = @"kPTYSessionCapturedOutputDidChange";
@@ -138,6 +142,7 @@ static NSString *const SESSION_ARRANGEMENT_TMUX_STATE = @"Tmux State";
 static NSString *const SESSION_ARRANGEMENT_TMUX_TAB_COLOR = @"Tmux Tab Color";
 static NSString *const SESSION_ARRANGEMENT_IS_TMUX_GATEWAY = @"Is Tmux Gateway";
 static NSString *const SESSION_ARRANGEMENT_TMUX_GATEWAY_SESSION_NAME = @"Tmux Gateway Session Name";
+static NSString *const SESSION_ARRANGEMENT_TMUX_DCS_ID = @"Tmux DCS ID";
 static NSString *const SESSION_ARRANGEMENT_TMUX_GATEWAY_SESSION_ID = @"Tmux Gateway Session ID";
 static NSString *const SESSION_ARRANGEMENT_DEFAULT_NAME = @"Session Default Name";  // manually set name
 static NSString *const SESSION_ARRANGEMENT_WINDOW_TITLE = @"Session Window Title";  // server-set window name
@@ -202,18 +207,6 @@ static NSTimeInterval kMinimumPartialLineTriggerCheckInterval = 0.5;
 // shuold be sent.
 static const NSTimeInterval kAntiIdleGracePeriod = 0.1;
 
-// Timer period between updates when active (not idle, tab is visible or title bar is changing,
-// etc.)
-static const NSTimeInterval kActiveUpdateCadence = 1 / 20.0;
-
-// Timer period between updates when adaptive frame rate is enabled and throughput is low but not 0.
-static const NSTimeInterval kFastUpdateCadence = 1.0 / 60.0;
-
-// Timer period for background sessions. This changes the tab item's color
-// so it must run often enough for that to be useful.
-// TODO(georgen): There's room for improvement here.
-static const NSTimeInterval kBackgroundUpdateCadence = 1;
-
 // Limit for number of entries in self.directories, self.commands, self.hosts.
 // Keeps saved state from exploding like in issue 5029.
 static const NSUInteger kMaxDirectories = 100;
@@ -225,7 +218,8 @@ static const NSUInteger kMaxHosts = 100;
     iTermCoprocessDelegate,
     iTermHotKeyNavigableSession,
     iTermPasteHelperDelegate,
-    iTermSessionViewDelegate>
+    iTermSessionViewDelegate,
+    iTermUpdateCadenceControllerDelegate>
 @property(nonatomic, retain) Interval *currentMarkOrNotePosition;
 @property(nonatomic, retain) TerminalFile *download;
 @property(nonatomic, retain) TerminalFileUpload *upload;
@@ -289,15 +283,6 @@ static const NSUInteger kMaxHosts = 100;
     // A view that wraps the textview. It is the scrollview's document. This exists to provide a
     // top margin above the textview.
     TextViewWrapper *_wrapper;
-
-    BOOL _useGCDUpdateTimer;
-    // This timer fires periodically to redraw textview, update the scroll position, tab appearance,
-    // etc.
-    NSTimer *_updateTimer;
-
-    // This is the experimental GCD version of the update timer that seems to have more regular refreshes.
-    dispatch_source_t _gcdUpdateTimer;
-    NSTimeInterval _cadence;
 
     // Anti-idle timer that sends a character every so often to the host.
     NSTimer *_antiIdleTimer;
@@ -475,6 +460,8 @@ static const NSUInteger kMaxHosts = 100;
 
     // Absolute line number where touchbar status changed.
     long long _statusChangedAbsLine;
+
+    iTermUpdateCadenceController *_cadenceController;
 }
 
 + (void)registerSessionInArrangement:(NSDictionary *)arrangement {
@@ -506,7 +493,6 @@ static const NSUInteger kMaxHosts = 100;
         _useAdaptiveFrameRate = [iTermAdvancedSettingsModel useAdaptiveFrameRate];
         _adaptiveFrameRateThroughputThreshold = [iTermAdvancedSettingsModel adaptiveFrameRateThroughputThreshold];
         _slowFrameRate = [iTermAdvancedSettingsModel slowFrameRate];
-        _useGCDUpdateTimer = [iTermAdvancedSettingsModel useGCDUpdateTimer];
         _idleTime = [iTermAdvancedSettingsModel idleTimeSeconds];
         _triggerLineNumber = -1;
         _fakePromptDetectedAbsLine = -1;
@@ -549,6 +535,8 @@ static const NSUInteger kMaxHosts = 100;
         // Allocate a guid. If we end up restoring from a session during startup this will be replaced.
         _guid = [[NSString uuid] retain];
         _throughputEstimator = [[iTermThroughputEstimator alloc] initWithHistoryOfDuration:5.0 / 30.0 secondsPerBucket:1 / 30.0];
+        _cadenceController = [[iTermUpdateCadenceController alloc] initWithThroughputEstimator:_throughputEstimator];
+        _cadenceController.delegate = self;
 
         _keystrokeSubscriptions = [[NSMutableDictionary alloc] init];
         _updateSubscriptions = [[NSMutableDictionary alloc] init];
@@ -642,10 +630,7 @@ ITERM_WEAKLY_REFERENCEABLE
     [_backgroundImagePath release];
     [_backgroundImage release];
     [_antiIdleTimer invalidate];
-    if (_gcdUpdateTimer != nil) {
-        dispatch_source_cancel(_gcdUpdateTimer);
-        dispatch_release(_gcdUpdateTimer);
-    }
+    [_cadenceController release];
     [_originalProfile release];
     [_liveSession release];
     [_tmuxGateway release];
@@ -1078,6 +1063,7 @@ ITERM_WEAKLY_REFERENCEABLE
     }
 
     NSNumber *tmuxPaneNumber = [arrangement objectForKey:SESSION_ARRANGEMENT_TMUX_PANE];
+    NSString *tmuxDCSIdentifier = nil;
     BOOL shouldEnterTmuxMode = NO;
     BOOL didRestoreContents = NO;
     BOOL attachedToServer = NO;
@@ -1110,6 +1096,7 @@ ITERM_WEAKLY_REFERENCEABLE
                     shouldEnterTmuxMode = ([arrangement[SESSION_ARRANGEMENT_IS_TMUX_GATEWAY] boolValue] &&
                                            arrangement[SESSION_ARRANGEMENT_TMUX_GATEWAY_SESSION_NAME] != nil &&
                                            arrangement[SESSION_ARRANGEMENT_TMUX_GATEWAY_SESSION_ID] != nil);
+                    tmuxDCSIdentifier = arrangement[SESSION_ARRANGEMENT_TMUX_DCS_ID];
                 }
             }
         }
@@ -1321,7 +1308,7 @@ ITERM_WEAKLY_REFERENCEABLE
     }
     if (shouldEnterTmuxMode) {
         // Restored a tmux gateway session.
-        [aSession startTmuxMode];
+        [aSession startTmuxMode:tmuxDCSIdentifier];
         [aSession.tmuxController sessionChangedTo:arrangement[SESSION_ARRANGEMENT_TMUX_GATEWAY_SESSION_NAME]
                                         sessionId:[arrangement[SESSION_ARRANGEMENT_TMUX_GATEWAY_SESSION_ID] intValue]];
     }
@@ -1507,8 +1494,12 @@ ITERM_WEAKLY_REFERENCEABLE
     DLog(@"Set session %@ to %@", self, VT100GridSizeDescription(size));
     [_screen setSize:size];
     [_shell setSize:size];
-    [_textview clearHighlights];
+    [_textview clearHighlights:NO];
     [[_delegate realParentWindow] invalidateRestorableState];
+    if (!_tailFindTimer &&
+        [_delegate sessionBelongsToVisibleTab]) {
+        [self beginTailFind];
+    }
 }
 
 - (void)setSplitSelectionMode:(SplitSelectionMode)mode move:(BOOL)move {
@@ -1676,6 +1667,13 @@ ITERM_WEAKLY_REFERENCEABLE
         env[PWD_ENVNAME] = [PWD_ENVVALUE stringByExpandingTildeInPath];
     }
 
+    // Remove trailing slashes, unless the path is just "/"
+    NSString *trimmed = [env[PWD_ENVNAME] stringByTrimmingTrailingCharactersFromCharacterSet:[NSCharacterSet characterSetWithCharactersInString:@"/"]];
+    if (trimmed.length == 0) {
+        trimmed = @"/";
+    }
+    env[PWD_ENVNAME] = trimmed;
+
     NSString *itermId = [self sessionId];
     env[@"ITERM_SESSION_ID"] = itermId;
     env[@"TERM_PROGRAM_VERSION"] = [[[NSBundle mainBundle] infoDictionary] objectForKey:@"CFBundleShortVersionString"];
@@ -1744,6 +1742,9 @@ ITERM_WEAKLY_REFERENCEABLE
 {
     if ([iTermApplication.sharedApplication delegate].isApplescriptTestApp) {
         // The applescript test driver doesn't care about short-lived sessions.
+        return;
+    }
+    if (self.isSingleUseSession) {
         return;
     }
     if ([[NSDate date] timeIntervalSinceDate:_creationDate] < [iTermAdvancedSettingsModel shortLivedSessionDuration]) {
@@ -1826,7 +1827,7 @@ ITERM_WEAKLY_REFERENCEABLE
                      !_shouldRestart &&
                      !_synthetic &&
                      ![[iTermController sharedInstance] applicationIsQuitting]);
-    [_terminal.parser forceUnhookDCS];
+    [_terminal.parser forceUnhookDCS:nil];
     self.tmuxMode = TMUX_NONE;
     [_tmuxController release];
     _hideAfterTmuxWindowOpens = NO;
@@ -1870,6 +1871,7 @@ ITERM_WEAKLY_REFERENCEABLE
     [_pasteHelper abort];
 
     [[_delegate realParentWindow] sessionDidTerminate:self];
+    [[NSNotificationCenter defaultCenter] postNotificationName:PTYSessionTerminatedNotification object:self];
 
     _delegate = nil;
 }
@@ -1945,6 +1947,7 @@ ITERM_WEAKLY_REFERENCEABLE
         [[iTermSessionHotkeyController sharedInstance] setShortcut:shortcut forSession:self];
 
         [_view autorelease];  // This balances a retain in -terminate prior to calling -makeTerminationUndoable
+        [[NSNotificationCenter defaultCenter] postNotificationName:PTYSessionRevivedNotification object:self];
         return YES;
     } else {
         return NO;
@@ -2191,7 +2194,7 @@ ITERM_WEAKLY_REFERENCEABLE
         }
     } else if (unicode == 'X') {
         [self printTmuxMessage:@"Exiting tmux mode, but tmux client may still be running."];
-        [self tmuxHostDisconnected];
+        [self tmuxHostDisconnected:[[_tmuxGateway.dcsID copy] autorelease]];
     }
 }
 
@@ -2350,7 +2353,7 @@ ITERM_WEAKLY_REFERENCEABLE
         dispatch_semaphore_signal(_executionSemaphore);
         dispatch_release(_executionSemaphore);
         [self release];
-    });
+        });
 }
 
 - (void)synchronousReadTask:(NSString *)string {
@@ -2809,16 +2812,21 @@ ITERM_WEAKLY_REFERENCEABLE
     return NO;
 }
 
-+ (BOOL)_recursiveSelectMenuItem:(NSString*)theName inMenu:(NSMenu*)menu {
++ (BOOL)_recursiveSelectMenuItemWithTitle:(NSString*)title identifier:(NSString *)identifier inMenu:(NSMenu*)menu {
     for (NSMenuItem* item in [menu itemArray]) {
         if (![item isEnabled] || [item isHidden]) {
             continue;
         }
         if ([item hasSubmenu]) {
-            if ([PTYSession _recursiveSelectMenuItem:theName inMenu:[item submenu]]) {
+            if ([PTYSession _recursiveSelectMenuItemWithTitle:title identifier:identifier inMenu:[item submenu]]) {
                 return YES;
             }
-        } else if ([theName isEqualToString:[item title]]) {
+        } else if (item.identifier && [identifier isEqualToString:item.identifier]) {
+            [NSApp sendAction:[item action]
+                           to:[item target]
+                         from:item];
+            return YES;
+        } else if (!identifier && [title isEqualToString:[item title]]) {
             [NSApp sendAction:[item action]
                            to:[item target]
                          from:item];
@@ -2862,9 +2870,15 @@ ITERM_WEAKLY_REFERENCEABLE
     }
 }
 
-+ (void)selectMenuItem:(NSString*)theName
-{
-    if (![self _recursiveSelectMenuItem:theName inMenu:[NSApp mainMenu]]) {
++ (void)selectMenuItem:(NSString*)theName {
+    NSArray *parts = [theName componentsSeparatedByString:@"\n"];
+    NSString *title = parts.firstObject;
+    NSString *identifier = nil;
+    // Only 10.12 and later support identifiers on menu items in interface builder.
+    if (IsSierraOrLater() && parts.count > 1) {
+        identifier = parts[1];
+    }
+    if (![self _recursiveSelectMenuItemWithTitle:title identifier:identifier inMenu:[NSApp mainMenu]]) {
         NSBeep();
     }
 }
@@ -4043,6 +4057,10 @@ ITERM_WEAKLY_REFERENCEABLE
         result[SESSION_ARRANGEMENT_IS_TMUX_GATEWAY] = @YES;
         result[SESSION_ARRANGEMENT_TMUX_GATEWAY_SESSION_ID] = @(self.tmuxController.sessionId);
         result[SESSION_ARRANGEMENT_TMUX_GATEWAY_SESSION_NAME] = self.tmuxController.sessionName;
+        NSString *dcsID = [[self.tmuxController.gateway.dcsID copy] autorelease];
+        if (dcsID) {
+            result[SESSION_ARRANGEMENT_TMUX_DCS_ID] = dcsID;
+        }
     }
 
     result[SESSION_ARRANGEMENT_SHELL_INTEGRATION_EVER_USED] = @(_shellIntegrationEverUsed);
@@ -4144,6 +4162,7 @@ ITERM_WEAKLY_REFERENCEABLE
     }
 
     [self checkPartialLineTriggers];
+    _passwordInput = _shell.passwordInput;
     _timerRunning = NO;
 }
 
@@ -4170,100 +4189,11 @@ ITERM_WEAKLY_REFERENCEABLE
     }
 }
 
-- (BOOL)updateTimerIsValid {
-    if (_useGCDUpdateTimer) {
-        return _gcdUpdateTimer != nil;
-    } else {
-        return _updateTimer.isValid;
-    }
-}
-
 - (void)setActive:(BOOL)active {
     DLog(@"setActive:%@ timerRunning=%@ updateTimer.isValue=%@ lastTimeout=%f session=%@",
-         @(active), @(_timerRunning), @(self.updateTimerIsValid), _lastTimeout, self);
+         @(active), @(_timerRunning), @(_cadenceController.updateTimerIsValid), _lastTimeout, self);
     _active = active;
-    [self changeCadenceIfNeeded];
-}
-
-- (void)changeCadenceIfNeeded {
-    BOOL effectivelyActive = (_active || !self.isIdle || [NSApp isActive]);
-    if (effectivelyActive && [_delegate sessionBelongsToVisibleTab]) {
-        if (_useAdaptiveFrameRate) {
-            const NSInteger kThroughputLimit = _adaptiveFrameRateThroughputThreshold;
-            const NSInteger estimatedThroughput = [_throughputEstimator estimatedThroughput];
-            if (estimatedThroughput < kThroughputLimit && estimatedThroughput > 0) {
-                [self setUpdateCadence:kFastUpdateCadence];
-            } else {
-                [self setUpdateCadence:1.0 / _slowFrameRate];
-            }
-        } else {
-            [self setUpdateCadence:kActiveUpdateCadence];
-        }
-    } else {
-        [self setUpdateCadence:kBackgroundUpdateCadence];
-    }
-}
-
-- (void)setUpdateCadence:(NSTimeInterval)cadence {
-    if (_useGCDUpdateTimer) {
-        [self setGCDUpdateCadence:cadence];
-    } else {
-        [self setTimerUpdateCadence:cadence];
-    }
-}
-
-- (void)setTimerUpdateCadence:(NSTimeInterval)cadence {
-    if (_updateTimer.timeInterval == cadence) {
-        DLog(@"No change to cadence.");
-        return;
-    }
-    DLog(@"Set cadence of %@ to %f", self, cadence);
-
-    [_updateTimer invalidate];
-    if (_inLiveResize) {
-        // This solves the bug where we don't redraw properly during live resize.
-        // I'm worried about the possible side effects it might have since there's no way to
-        // know all the tracking event loops.
-        _updateTimer = [NSTimer timerWithTimeInterval:kActiveUpdateCadence
-                                               target:self.weakSelf
-                                             selector:@selector(updateDisplay)
-                                             userInfo:nil
-                                              repeats:YES];
-        [[NSRunLoop currentRunLoop] addTimer:_updateTimer forMode:NSRunLoopCommonModes];
-    } else {
-        _updateTimer = [NSTimer scheduledTimerWithTimeInterval:cadence
-                                                        target:self.weakSelf
-                                                      selector:@selector(updateDisplay)
-                                                      userInfo:nil
-                                                       repeats:YES];
-    }
-}
-- (void)setGCDUpdateCadence:(NSTimeInterval)cadence {
-    const NSTimeInterval period = _inLiveResize ? kActiveUpdateCadence : cadence;
-    if (_cadence == period) {
-        DLog(@"No change to cadence.");
-        return;
-    }
-    DLog(@"Set cadence of %@ to %f", self, cadence);
-
-    _cadence = period;
-
-    if (_gcdUpdateTimer != nil) {
-        dispatch_source_cancel(_gcdUpdateTimer);
-        dispatch_release(_gcdUpdateTimer);
-        _gcdUpdateTimer = nil;
-    }
-
-    _gcdUpdateTimer = dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER, 0, 0, dispatch_get_main_queue());
-    dispatch_source_set_timer(_gcdUpdateTimer,
-                              dispatch_walltime(NULL, 0),
-                              period * NSEC_PER_SEC,
-                              0.005 * NSEC_PER_SEC);
-    PTYSession *weakSelf = self.weakSelf;
-    dispatch_source_set_event_handler(_gcdUpdateTimer, ^{
-        [weakSelf updateDisplay];
-    });
-    dispatch_resume(_gcdUpdateTimer);
+    [_cadenceController changeCadenceIfNeeded];
 }
 
 - (void)doAntiIdle {
@@ -4419,11 +4349,7 @@ ITERM_WEAKLY_REFERENCEABLE
     if ([iTermAdvancedSettingsModel trackingRunloopForLiveResize]) {
         if (notification.object == self.textview.window) {
             _inLiveResize = YES;
-            if (!_useGCDUpdateTimer) {
-                if (_updateTimer) {
-                    [[NSRunLoop currentRunLoop] addTimer:_updateTimer forMode:NSRunLoopCommonModes];
-                }
-            }
+            [_cadenceController willStartLiveResize];
         }
     }
 }
@@ -4432,18 +4358,7 @@ ITERM_WEAKLY_REFERENCEABLE
     if ([iTermAdvancedSettingsModel trackingRunloopForLiveResize]) {
         if (notification.object == self.textview.window) {
             _inLiveResize = NO;
-            if (_useGCDUpdateTimer) {
-                NSTimeInterval cadence = _cadence;
-                _cadence = 0;
-                [self setUpdateCadence:cadence];
-            } else {
-                if (_updateTimer) {
-                    NSTimeInterval cadence = _updateTimer.timeInterval;
-                    [_updateTimer invalidate];
-                    _updateTimer = nil;
-                    [self setUpdateCadence:cadence];
-                }
-            }
+            [_cadenceController liveResizeDidEnd];
         }
     }
 }
@@ -4714,9 +4629,8 @@ ITERM_WEAKLY_REFERENCEABLE
     [self takeFocus];
 }
 
-- (void)clearHighlights
-{
-    [_textview clearHighlights];
+- (void)findViewControllerClearSearch {
+    [_textview clearHighlights:YES];
 }
 
 - (NSImage *)snapshot {
@@ -4926,13 +4840,12 @@ ITERM_WEAKLY_REFERENCEABLE
     }
 }
 
-- (void)startTmuxMode
-{
+- (void)startTmuxMode:(NSString *)dcsID {
     if (self.tmuxMode != TMUX_NONE) {
         return;
     }
     self.tmuxMode = TMUX_GATEWAY;
-    _tmuxGateway = [[TmuxGateway alloc] initWithDelegate:self];
+    _tmuxGateway = [[TmuxGateway alloc] initWithDelegate:self dcsID:dcsID];
     ProfileModel *model;
     if (_isDivorced) {
         model = [ProfileModel sessionsInstance];
@@ -5232,7 +5145,8 @@ ITERM_WEAKLY_REFERENCEABLE
 }
 
 - (void)tmuxWindowRenamedWithId:(int)windowId to:(NSString *)newName {
-    [_delegate sessionWithTmuxGateway:self wasNotifiedWindowWithId:windowId renamedTo:newName];
+    PTYSession *representativeSession = [[_tmuxController sessionsInWindow:windowId] firstObject];
+    [representativeSession.delegate sessionDidChangeTmuxWindowNameTo:newName];
     [_tmuxController windowWasRenamedWithId:windowId to:newName];
 }
 
@@ -5258,11 +5172,10 @@ ITERM_WEAKLY_REFERENCEABLE
     return _delegate.realParentWindow;
 }
 
-- (void)tmuxHostDisconnected {
+- (void)tmuxHostDisconnected:(NSString *)dcsID {
     _hideAfterTmuxWindowOpens = NO;
 
     [_tmuxController detach];
-
     // Autorelease the gateway because it called this function so we can't free
     // it immediately.
     [_tmuxGateway autorelease];
@@ -5271,10 +5184,11 @@ ITERM_WEAKLY_REFERENCEABLE
     _tmuxController = nil;
     [_screen appendStringAtCursor:@"Detached"];
     [_screen crlf];
-    // There's a not-so-bad race condition here. It's possible that tmux would exit and a new
-    // session would start right away and we'd wack the wrong tmux parser. However, it would be
-    // very unusual for that to happen so quickly.
-    [_terminal.parser forceUnhookDCS];
+    [dcsID retain];
+    dispatch_async([[self class] tmuxQueue], ^{
+        [_terminal.parser forceUnhookDCS:dcsID];
+        [dcsID release];
+    });
     self.tmuxMode = TMUX_NONE;
 
     if ([iTermPreferences boolForKey:kPreferenceKeyAutoHideTmuxClientSession] &&
@@ -5680,7 +5594,7 @@ ITERM_WEAKLY_REFERENCEABLE
             break;
 
         case KEY_ACTION_PASTE_SPECIAL_FROM_SELECTION: {
-            NSString *string = [self mostRecentlySelectedText];
+            NSString *string = [[iTermController sharedInstance] lastSelection];
             if (string.length) {
                 [_pasteHelper pasteString:string
                              stringConfig:keyBindingText];
@@ -6459,19 +6373,8 @@ ITERM_WEAKLY_REFERENCEABLE
     [[_delegate realParentWindow] restartSessionWithConfirmation:self];
 }
 
-- (NSString *)mostRecentlySelectedText {
-    PTYSession *session = [[iTermController sharedInstance] sessionWithMostRecentSelection];
-    if (session) {
-        PTYTextView *textview = [session textview];
-        if ([textview isAnyCharSelected]) {
-            return [textview selectedText];
-        }
-    }
-    return nil;
-}
-
 - (void)textViewPasteFromSessionWithMostRecentSelection:(PTYSessionPasteFlags)flags {
-    NSString *string = [self mostRecentlySelectedText];
+    NSString *string = [[iTermController sharedInstance] lastSelection];
     if (string) {
         [self pasteString:string flags:flags];
     }
@@ -6833,6 +6736,10 @@ ITERM_WEAKLY_REFERENCEABLE
 
 - (VT100GridCoord)textViewCopyModeCursorCoord {
     return _copyModeState.coord;
+}
+
+- (BOOL)textViewPasswordInput {
+    return _passwordInput;
 }
 
 - (void)textViewDidSelectRangeForFindOnPage:(VT100GridCoordRange)range {
@@ -7301,8 +7208,8 @@ ITERM_WEAKLY_REFERENCEABLE
     return [[self view] viewId];
 }
 
-- (void)screenStartTmuxMode {
-    [self startTmuxMode];
+- (void)screenStartTmuxModeWithDCSIdentifier:(NSString *)dcsID {
+    [self startTmuxMode:dcsID];
 }
 
 - (void)screenHandleTmuxInput:(VT100Token *)token {
@@ -7350,7 +7257,7 @@ ITERM_WEAKLY_REFERENCEABLE
 }
 
 - (void)screenClearHighlights {
-    [_textview clearHighlights];
+    [_textview clearHighlights:NO];
 }
 
 - (void)screenMouseModeDidChange {
@@ -8219,7 +8126,8 @@ ITERM_WEAKLY_REFERENCEABLE
         DLog(@"Update command to %@, have=%d, range.start.x=%d", command, (int)haveCommand, range.start.x);
         if (haveCommand) {
             [[_delegate realParentWindow] updateAutoCommandHistoryForPrefix:command
-                                                                   inSession:self];
+                                                                   inSession:self
+                                                                popIfNeeded:NO];
         }
     }
 }
@@ -9023,6 +8931,24 @@ ITERM_WEAKLY_REFERENCEABLE
     [self queueAnnouncement:announcement identifier:[[NSUUID UUID] UUIDString]];
 }
 
+#pragma mark - iTermUpdateCadenceController
+
+- (void)updateCadenceControllerUpdateDisplay:(iTermUpdateCadenceController *)controller {
+    [self updateDisplay];
+}
+
+- (iTermUpdateCadenceState)updateCadenceControllerState {
+    iTermUpdateCadenceState state;
+    state.active = _active;
+    state.idle = self.isIdle;
+    state.visible = [_delegate sessionBelongsToVisibleTab];
+    state.useAdaptiveFrameRate = _useAdaptiveFrameRate;
+    state.adaptiveFrameRateThroughputThreshold = _adaptiveFrameRateThroughputThreshold;
+    state.slowFrameRate = _slowFrameRate;
+    state.liveResizing = _inLiveResize;
+    return state;
+}
+
 #pragma mark - API
 
 - (NSString *)stringForLine:(screen_char_t *)screenChars
@@ -9197,6 +9123,8 @@ ITERM_WEAKLY_REFERENCEABLE
             break;
 
         case ITMNotificationType_NotifyOnNewSession:
+        case ITMNotificationType_NotifyOnTerminateSession:
+        case ITMNotificationType_NotifyOnLayoutChange:
             // We won't get called for this
             assert(NO);
             break;

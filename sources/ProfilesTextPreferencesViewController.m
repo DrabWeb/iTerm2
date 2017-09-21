@@ -249,6 +249,27 @@ static NSInteger kNonAsciiFontButtonTag = 1;
     }
     [_nonAsciiFontDescription setStringValue:fontName];
 
+    if (self.normalFont.it_defaultLigatures) {
+        _asciiLigatures.state = NSOnState;
+        _asciiLigatures.enabled = NO;
+    } else if (self.normalFont.it_ligatureLevel == 0) {
+        _asciiLigatures.state = NSOffState;
+        _asciiLigatures.enabled = NO;
+    } else {
+        _asciiLigatures.state = [self boolForKey:KEY_ASCII_LIGATURES] ? NSOnState : NSOffState;
+        _asciiLigatures.enabled = YES;
+    }
+    if (self.nonAsciiFont.it_defaultLigatures) {
+        _nonAsciiLigatures.state = NSOnState;
+        _nonAsciiLigatures.enabled = NO;
+    } else if (self.nonAsciiFont.it_ligatureLevel == 0) {
+        _nonAsciiLigatures.state = NSOffState;
+        _nonAsciiLigatures.enabled = NO;
+    } else {
+        _nonAsciiLigatures.state = [self boolForKey:KEY_NON_ASCII_LIGATURES] ? NSOnState : NSOffState;
+        _nonAsciiLigatures.enabled = YES;
+    }
+
     [self updateWarnings];
 }
 
@@ -278,7 +299,10 @@ static NSInteger kNonAsciiFontButtonTag = 1;
     [[NSFontManager sharedFontManager] orderFrontFontPanel:self];
 }
 
-- (NSUInteger)validModesForFontPanel:(NSFontPanel *)fontPanel {
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wpartial-availability"
+- (NSFontPanelModeMask)validModesForFontPanel:(NSFontPanel *)fontPanel {
+#pragma clang diagnostic pop
     return kValidModesForFontPanel;
 }
 

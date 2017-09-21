@@ -22,6 +22,7 @@ static NSString *const kImageInfoPreserveAspectRatioKey = @"Preserve Aspect Rati
 static NSString *const kImageInfoFilenameKey = @"Filename";
 static NSString *const kImageInfoInsetKey = @"Edge Insets";
 static NSString *const kImageInfoCodeKey = @"Code";
+static NSString *const kImageInfoBrokenKey = @"Broken";
 
 NSString *const iTermImageDidLoad = @"iTermImageDidLoad";
 
@@ -36,7 +37,7 @@ NSString *const iTermImageDidLoad = @"iTermImageDidLoad";
     NSData *_data;
     NSString *_uniqueIdentifier;
     NSDictionary *_dictionary;
-    void (^_queuedBlock)();
+    void (^_queuedBlock)(void);
 }
 
 - (instancetype)initWithCode:(unichar)code {
@@ -51,6 +52,7 @@ NSString *const iTermImageDidLoad = @"iTermImageDidLoad";
     self = [super init];
     if (self) {
         _size = [dictionary[kImageInfoSizeKey] sizeValue];
+        _broken = [dictionary[kImageInfoBrokenKey] boolValue];
         _inset = [dictionary[kImageInfoInsetKey] futureEdgeInsetsValue];
         _data = [dictionary[kImageInfoImageKey] retain];
         _dictionary = [dictionary copy];
@@ -95,7 +97,7 @@ NSString *const iTermImageDidLoad = @"iTermImageDidLoad";
     _dictionary = nil;
     
     DLog(@"Queueing load of %@", self.uniqueIdentifier);
-    void (^block)() = ^{
+    void (^block)(void) = ^{
         // This is a slow operation that blocks for a long time.
         iTermImage *image = [iTermImage imageWithCompressedData:_data];
         dispatch_sync(dispatch_get_main_queue(), ^{
@@ -114,7 +116,7 @@ NSString *const iTermImageDidLoad = @"iTermImageDidLoad";
         [blocks insertObject:_queuedBlock atIndex:0];
     }
     dispatch_async(queue, ^{
-        void (^blockToRun)() = nil;
+        void (^blockToRun)(void) = nil;
         @synchronized(self) {
             blockToRun = [blocks firstObject];
             [blockToRun retain];
@@ -134,6 +136,45 @@ NSString *const iTermImageDidLoad = @"iTermImageDidLoad";
     [_dictionary release];
     [_uniqueIdentifier release];
     [super dealloc];
+}
+
+- (void)saveToFile:(NSString *)filename {
+    NSBitmapImageFileType fileType = NSPNGFileType;
+    if ([filename hasSuffix:@".bmp"]) {
+        fileType = NSBMPFileType;
+    } else if ([filename hasSuffix:@".gif"]) {
+        fileType = NSGIFFileType;
+    } else if ([filename hasSuffix:@".jp2"]) {
+        fileType = NSJPEG2000FileType;
+    } else if ([filename hasSuffix:@".jpg"] || [filename hasSuffix:@".jpeg"]) {
+        fileType = NSJPEGFileType;
+    } else if ([filename hasSuffix:@".png"]) {
+        fileType = NSPNGFileType;
+    } else if ([filename hasSuffix:@".tiff"]) {
+        fileType = NSTIFFFileType;
+    }
+
+    NSData *data = nil;
+    NSDictionary *universalTypeToCocoaMap = @{ (NSString *)kUTTypeBMP: @(NSBMPFileType),
+                                               (NSString *)kUTTypeGIF: @(NSGIFFileType),
+                                               (NSString *)kUTTypeJPEG2000: @(NSJPEG2000FileType),
+                                               (NSString *)kUTTypeJPEG: @(NSJPEGFileType),
+                                               (NSString *)kUTTypePNG: @(NSPNGFileType),
+                                               (NSString *)kUTTypeTIFF: @(NSTIFFFileType) };
+    NSString *imageType = self.imageType;
+    if (self.broken) {
+        data = self.data;
+    } else if (imageType) {
+        NSNumber *nsTypeNumber = universalTypeToCocoaMap[imageType];
+        if (nsTypeNumber.integerValue == fileType) {
+            data = self.data;
+        }
+    }
+    if (!data) {
+        NSBitmapImageRep *rep = [self.image.images.firstObject bitmapImageRep];
+        data = [rep representationUsingType:fileType properties:@{}];
+    }
+    [data writeToFile:filename atomically:NO];
 }
 
 - (void)setImageFromImage:(iTermImage *)image data:(NSData *)data {
@@ -165,7 +206,8 @@ NSString *const iTermImageDidLoad = @"iTermImageDidLoad";
               kImageInfoImageKey: _data ?: [NSData data],
               kImageInfoPreserveAspectRatioKey: @(_preserveAspectRatio),
               kImageInfoFilenameKey: _filename ?: @"",
-              kImageInfoCodeKey: @(_code)};
+              kImageInfoCodeKey: @(_code),
+              kImageInfoBrokenKey: @(_broken) };
 }
 
 

@@ -273,9 +273,11 @@ typedef NS_ENUM(NSInteger, iTermObjectType) {
 
 // Type for KEY_THIN_STROKES
 typedef NS_ENUM(NSInteger, iTermThinStrokesSetting) {
-    iTermThinStrokesSettingNever,
-    iTermThinStrokesSettingRetinaOnly,
-    iTermThinStrokesSettingAlways,
+    iTermThinStrokesSettingNever = 0,
+    iTermThinStrokesSettingRetinaDarkBackgroundsOnly = 1,
+    iTermThinStrokesSettingDarkBackgroundsOnly = 2,
+    iTermThinStrokesSettingAlways = 3,
+    iTermThinStrokesSettingRetinaOnly = 4,
 };
 
 typedef NS_ENUM(NSUInteger, iTermHotKeyDockPreference) {
@@ -324,6 +326,6 @@ typedef NS_ENUM(NSUInteger, iTermUnicodeNormalization) {
 // Removes the profile from the model, removes key mappings that reference this profile, and posts a
 // kProfileWasDeletedNotification notification, then flushes the model to backing store.
 + (BOOL)removeProfile:(Profile *)profile fromModel:(ProfileModel *)model;
-+ (void)performBlockWithCoalescedNotifications:(void (^)())block;
++ (void)performBlockWithCoalescedNotifications:(void (^)(void))block;
 
 @end
