@@ -57,7 +57,8 @@
     return NO;
 }
 
-- (BOOL)fileExistsAtPathLocally:(NSString *)filename additionalNetworkPaths:(NSArray *)additionalNetworkPaths {
+- (BOOL)fileExistsAtPathLocally:(NSString *)filename
+         additionalNetworkPaths:(NSArray<NSString *> *)additionalNetworkPaths {
     NSMutableArray *networkPaths = [[_networkMountPoints mutableCopy] autorelease];
     [networkPaths addObjectsFromArray:additionalNetworkPaths];
     for (NSString *networkPath in networkPaths) {

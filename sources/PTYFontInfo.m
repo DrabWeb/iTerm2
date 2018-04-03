@@ -9,6 +9,8 @@
 #import "PTYFontInfo.h"
 
 #import "DebugLogging.h"
+#import "FontSizeEstimator.h"
+#import "iTermAdvancedSettingsModel.h"
 
 @implementation NSFont(PTYFontInfo)
 
@@ -52,16 +54,7 @@
     static NSSet *fontsWithDefaultLigatures;
     static dispatch_once_t onceToken;
     dispatch_once(&onceToken, ^{
-        fontsWithDefaultLigatures = [[NSSet setWithArray:@[ @"FiraCode-Bold",
-                                                            @"FiraCode-Light",
-                                                            @"FiraCode-Medium",
-                                                            @"FiraCode-Regular",
-                                                            @"FiraCode-Retina",
-                                                            @"FuraCodeNerdFontCompleteMono---Bold",
-                                                            @"FuraCodeNerdFontCompleteMono---Light",
-                                                            @"FuraCodeNerdFontCompleteMono---Medium",
-                                                            @"FuraCodeNerdFontCompleteMono---Regular",
-                                                            @"FuraCodeNerdFontCompleteMono---Retina" ]] retain];
+        fontsWithDefaultLigatures = [[NSSet setWithArray:@[ ]] retain];
     });
     BOOL result = [fontsWithDefaultLigatures containsObject:self.fontName];
     DLog(@"Default ligatures for '%@' is %@", self.fontName, @(result));
@@ -80,6 +73,54 @@
 @synthesize boldVersion = boldVersion_;
 @synthesize italicVersion = italicVersion_;
 
++ (PTYFontInfo *)fontForAsciiCharacter:(BOOL)isAscii
+                             asciiFont:(PTYFontInfo *)asciiFont
+                          nonAsciiFont:(PTYFontInfo *)nonAsciiFont
+                           useBoldFont:(BOOL)useBoldFont
+                         useItalicFont:(BOOL)useItalicFont
+                      usesNonAsciiFont:(BOOL)useNonAsciiFont
+                            renderBold:(BOOL *)renderBold
+                          renderItalic:(BOOL *)renderItalic {
+    BOOL isBold = *renderBold && useBoldFont;
+    BOOL isItalic = *renderItalic && useItalicFont;
+    *renderBold = NO;
+    *renderItalic = NO;
+    PTYFontInfo *theFont;
+    BOOL usePrimary = !useNonAsciiFont || isAscii;
+
+    PTYFontInfo *rootFontInfo = usePrimary ? asciiFont : nonAsciiFont;
+    theFont = rootFontInfo;
+
+    if (isBold && isItalic) {
+        theFont = rootFontInfo.boldItalicVersion;
+        if (!theFont && rootFontInfo.boldVersion) {
+            theFont = rootFontInfo.boldVersion;
+            *renderItalic = YES;
+        } else if (!theFont && rootFontInfo.italicVersion) {
+            theFont = rootFontInfo.italicVersion;
+            *renderBold = YES;
+        } else if (!theFont) {
+            theFont = rootFontInfo;
+            *renderBold = YES;
+            *renderItalic = YES;
+        }
+    } else if (isBold) {
+        theFont = rootFontInfo.boldVersion;
+        if (!theFont) {
+            theFont = rootFontInfo;
+            *renderBold = YES;
+        }
+    } else if (isItalic) {
+        theFont = rootFontInfo.italicVersion;
+        if (!theFont) {
+            theFont = rootFontInfo;
+            *renderItalic = YES;
+        }
+    }
+
+    return theFont;
+}
+
 + (PTYFontInfo *)fontInfoWithFont:(NSFont *)font {
     PTYFontInfo *fontInfo = [[[PTYFontInfo alloc] init] autorelease];
     fontInfo.font = font;
@@ -96,7 +137,7 @@
 - (void)setFont:(NSFont *)font {
     [font_ autorelease];
     font_ = [font retain];
-    
+
     _ligatureLevel = font.it_ligatureLevel;
     _hasDefaultLigatures = font.it_defaultLigatures;
 
@@ -115,7 +156,15 @@
 }
 
 - (CGFloat)computedBaselineOffset {
-    return -(floorf(font_.leading) - floorf(self.descender));
+    if ([iTermAdvancedSettingsModel useExperimentalFontMetrics]) {
+        NSTextContainer *textContainer = [FontSizeEstimator newTextContainer];
+        NSLayoutManager *layoutManager = [FontSizeEstimator newLayoutManagerForFont:font_ textContainer:textContainer];
+        CGFloat lineHeight = [layoutManager usedRectForTextContainer:textContainer].size.height;
+        CGFloat baselineOffsetFromTop = [layoutManager defaultBaselineOffsetForFont:font_];
+        return -floorf(lineHeight - baselineOffsetFromTop);
+    } else {
+        return -(floorf(font_.leading) - floorf(self.descender));
+    }
 }
 
 // From https://github.com/DrawKit/DrawKit/blob/master/framework/Code/NSBezierPath%2BText.m#L648
@@ -128,7 +177,7 @@
     NSAttributedString *attributedString = [[[NSAttributedString alloc] initWithString:@"M" attributes:attributes] autorelease];
     NSTextStorage *textStorage = [[NSTextStorage alloc] initWithAttributedString:attributedString];
     [textStorage addLayoutManager:layoutManager];
-    
+
     NSUInteger glyphIndex = [layoutManager glyphIndexForCharacterAtIndex:0];
     return [[layoutManager typesetter] baselineOffsetInLayoutManager:layoutManager
                                                           glyphIndex:glyphIndex] / -2.0;
@@ -145,7 +194,7 @@
     NSInteger minimumAcceptableWeight = weight + 4;
     DLog(@"Looking for a bold version of %@, whose weight is %@", font, @(weight));
     NSFont *lastFont = font;
-    
+
     // Sometimes the heavier version of a font is oblique (issue 4442). So
     // check the traits to make sure nothing significant changes.
     const NSFontTraitMask kImmutableTraits = (NSItalicFontMask |

@@ -9,7 +9,7 @@
 #import "TransferrableFile.h"
 
 #import "NSFileManager+iTerm.h"
-#import "iTermGrowlDelegate.h"
+#import "iTermNotificationController.h"
 
 @implementation TransferrableFile {
     NSTimeInterval _timeOfLastStatusChange;
@@ -124,15 +124,15 @@
                 case kTransferrableFileStatusCancelling:
                 case kTransferrableFileStatusCancelled:
                     break;
-                    
+
                 case kTransferrableFileStatusFinishedSuccessfully:
-                    [[iTermGrowlDelegate sharedInstance] growlNotify:
+                    [[iTermNotificationController sharedInstance] notify:
                         [NSString stringWithFormat:@"%@ of “%@” finished!",
                             self.isDownloading ? @"Download" : @"Upload", [self shortName]]];
                     break;
 
                 case kTransferrableFileStatusFinishedWithError:
-                    [[iTermGrowlDelegate sharedInstance] growlNotify:
+                    [[iTermNotificationController sharedInstance] notify:
                      [NSString stringWithFormat:@"%@ of “%@” failed.",
                       self.isDownloading ? @"Download" : @"Upload", [self shortName]]];
             }

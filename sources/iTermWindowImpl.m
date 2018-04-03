@@ -10,7 +10,7 @@ NS_ASSUME_NONNULL_BEGIN
 {
     int blurFilter;
     double blurRadius_;
-    
+
     // If set, then windowWillShowInitial is not invoked.
     BOOL _layoutDone;
 
@@ -24,6 +24,8 @@ NS_ASSUME_NONNULL_BEGIN
 
     // Cached value of the percentage of this window that is occluded by other nonpanel windows in this app.
     double _cachedTotalOcclusion;
+
+    NSTimeInterval _timeOfLastWindowTitleChange;
 }
 
 - (instancetype)initWithContentRect:(NSRect)contentRect
@@ -51,6 +53,16 @@ ITERM_WEAKLY_REFERENCEABLE
     [restoreState_ release];
     [super dealloc];
 
+}
+
+- (BOOL)titleChangedRecently {
+    NSTimeInterval now = [NSDate timeIntervalSinceReferenceDate];
+    return (now > _timeOfLastWindowTitleChange && now - _timeOfLastWindowTitleChange < iTermWindowTitleChangeMinimumInterval);
+}
+
+- (void)setTitle:(NSString *)title {
+    [super setTitle:title];
+    _timeOfLastWindowTitleChange = [NSDate timeIntervalSinceReferenceDate];
 }
 
 - (BOOL)validateMenuItem:(NSMenuItem *)item {
@@ -188,7 +200,7 @@ ITERM_WEAKLY_REFERENCEABLE
     NSArray<NSValue *> *frames = [windows mapWithBlock:^id(NSWindow *window) {
         return [NSValue valueWithRect:window.frame];
     }];
-    
+
     double lowestCost = INFINITY;
     NSRect bestFrame = self.frame;
     const CGFloat widthToScan = screenRect.size.width - self.frame.size.width;
@@ -208,7 +220,7 @@ ITERM_WEAKLY_REFERENCEABLE
             CGFloat distanceFromScreenCenter = sqrt(pow(proposedCenter.x - screenCenter.x, 2) +
                                                     pow(proposedCenter.y - screenCenter.y, 2)) / maxDistance;
             const CGFloat cost = [self sumOfIntersectingAreaOfRect:proposedRect withRects:frames] + distanceFromScreenCenter;
-            
+
             if (cost < lowestCost) {
                 lowestCost = cost;
                 bestFrame = proposedRect;
@@ -361,7 +373,7 @@ ITERM_WEAKLY_REFERENCEABLE
             }
         }
     }
-    
+
     _totalOcclusionCacheTime = [NSDate timeIntervalSinceReferenceDate];
     _cachedTotalOcclusion = totalOcclusion;
     return totalOcclusion;
@@ -379,6 +391,10 @@ ITERM_WEAKLY_REFERENCEABLE
     DLog(@"%p makeFirstResponder:%@", self, responder);
     DLog(@"%@", [NSThread callStackSymbols]);
     return [super makeFirstResponder:responder];
+}
+
+- (NSWindowTabbingMode)tabbingMode {
+    return NSWindowTabbingModeDisallowed;
 }
 
 NS_ASSUME_NONNULL_END

@@ -542,6 +542,9 @@ static NSString *const kDiffScriptPath = @"/tmp/diffs";
 - (void)textViewBurySession {
 }
 
+- (void)textViewNeedsDisplayInRect:(NSRect)rect {
+}
+
 - (BOOL)continueFindAllResults:(NSMutableArray *)results inContext:(FindContext *)context {
     return NO;
 }
@@ -669,9 +672,9 @@ static NSString *const kDiffScriptPath = @"/tmp/diffs";
     if (image1.length != image2.length) {
         return NO;
     }
-    
+
     NSMutableData *diffData = [NSMutableData data];
-    
+
     unsigned char *bytes1 = (unsigned char *)image1.bytes;
     unsigned char *bytes2 = (unsigned char *)image2.bytes;
     const CGFloat threshold = 0.1;
@@ -687,7 +690,7 @@ static NSString *const kDiffScriptPath = @"/tmp/diffs";
         CGFloat diff = fabs(brightness1 - brightness2);
 
         unsigned char diffbytes[3] = { 0, 0, 0 };
-        
+
         if (diff > 0) {
             diffbytes[0] = diff * 255;
             diffbytes[1] = (1.0 - diff) * 255;
@@ -710,7 +713,7 @@ static NSString *const kDiffScriptPath = @"/tmp/diffs";
     CGFloat N = image1.length / 4;
     stats->variance = sumOfSquares/N - (sum/N)*(sum/N);
     stats->maxDiff = maxDiff;
-    
+
     NSImage *diffImage = [NSImage imageWithRawData:diffData
                                               size:size
                                      bitsPerSample:8
@@ -719,7 +722,7 @@ static NSString *const kDiffScriptPath = @"/tmp/diffs";
                                     colorSpaceName:NSCalibratedRGBColorSpace];
     NSData *encodedDiffImage = [diffImage dataForFileOfType:NSPNGFileType];
     [encodedDiffImage writeToFile:diffPath atomically:NO];
-    
+
     return maxDiff < threshold;
 }
 
@@ -2177,6 +2180,7 @@ static NSString *const kDiffScriptPath = @"/tmp/diffs";
                                   helper.showTimestamps = YES;
                                   helper.now = now;
                                   helper.useTestingTimezone = YES;  // Use GMT so test can pass anywhere.
+                                  [helper createTimestampDrawingHelper];
                               };
                           }
               profileOverrides:nil
@@ -2284,7 +2288,7 @@ static NSString *const kDiffScriptPath = @"/tmp/diffs";
 - (void)testEmoji {
     // The exclamation point tests the case where CTRunGetGlyphsPtr returns nil. It has a combining
     // mark that colors it.
-    [self doGoldenTestForInput:@"😄 1️⃣ ❗ \r\n\e[41m🐶 🎅 🚀 "
+    [self doGoldenTestForInput:@"😄1️⃣❗\r\n\e[41m🐶🎅🚀"
                           name:NSStringFromSelector(_cmd)
                           hook:nil
               profileOverrides:nil
@@ -2631,6 +2635,46 @@ static NSString *const kDiffScriptPath = @"/tmp/diffs";
 }
 
 - (void)textViewDidFindDirtyRects {
+}
+
+- (BOOL)backgroundImageTiled {
+    return NO;
+}
+
+- (NSImage *)textViewBackgroundImage {
+    return nil;
+}
+
+- (BOOL)textViewCopyMode {
+    return NO;
+}
+
+- (VT100GridCoord)textViewCopyModeCursorCoord {
+    return VT100GridCoordMake(0, 0);
+}
+
+- (BOOL)textViewCopyModeSelecting {
+    return NO;
+}
+
+- (void)textViewDidHighightMark {
+}
+
+- (void)textViewDidSelectPasswordPrompt {
+}
+
+- (void)textViewDidSelectRangeForFindOnPage:(VT100GridCoordRange)range {
+}
+
+- (BOOL)textViewPasswordInput {
+    return NO;
+}
+
+- (BOOL)textViewShouldDrawRect {
+    return YES;
+}
+
+- (void)textViewShowHoverURL:(NSString *)url {
 }
 
 @end

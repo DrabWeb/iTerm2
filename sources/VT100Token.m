@@ -47,19 +47,19 @@ static iTermObjectPool *gPool;
         free(_csi);
         _csi = NULL;
     }
-    
+
     [_string release];
     _string = nil;
-    
+
     [_kvpKey release];
     _kvpKey = nil;
-    
+
     [_kvpValue release];
     _kvpValue = nil;
-    
+
     [_savedData release];
     _savedData = nil;
-    
+
     if (_asciiData.buffer != _asciiData.staticBuffer) {
         free(_asciiData.buffer);
     }
@@ -70,7 +70,7 @@ static iTermObjectPool *gPool;
     _asciiData.buffer = NULL;
     _asciiData.length = 0;
     _asciiData.screenChars = NULL;
-    
+
     type = 0;
     code = 0;
 }
@@ -160,6 +160,7 @@ static iTermObjectPool *gPool;
                           @(VT100CSI_DECDSR):                 @"VT100CSI_DECDSR",
                           @(VT100CSI_SET_MODIFIERS):          @"VT100CSI_SET_MODIFIERS",
                           @(VT100CSI_RESET_MODIFIERS):        @"VT100CSI_RESET_MODIFIERS",
+                          @(VT100CSI_REP):                    @"VT100CSI_REP",
                           @(VT100CSI_DECSLRM):                @"VT100CSI_DECSLRM",
                           @(XTERMCC_WIN_TITLE):               @"XTERMCC_WIN_TITLE",
                           @(XTERMCC_ICON_TITLE):              @"XTERMCC_ICON_TITLE",
@@ -197,6 +198,8 @@ static iTermObjectPool *gPool;
                           @(XTERMCC_PASTE64):                 @"XTERMCC_PASTE64",
                           @(XTERMCC_FINAL_TERM):              @"XTERMCC_FINAL_TERM",
                           @(XTERMCC_LINK):                    @"XTERMCC_LINK",
+                          @(XTERMCC_TEXT_BACKGROUND_COLOR):   @"XTERMCC_TEXT_BACKGROUND_COLOR",
+                          @(XTERMCC_TEXT_FOREGROUND_COLOR):   @"XTERMCC_TEXT_FOREGROUND_COLOR",
                           @(ANSICSI_CHA):                     @"ANSICSI_CHA",
                           @(ANSICSI_VPA):                     @"ANSICSI_VPA",
                           @(ANSICSI_VPR):                     @"ANSICSI_VPR",
@@ -260,7 +263,7 @@ static iTermObjectPool *gPool;
 
 - (void)setAsciiBytes:(char *)bytes length:(int)length {
     assert(_asciiData.buffer == NULL);
-    
+
     _asciiData.length = length;
     if (length > sizeof(_asciiData.staticBuffer)) {
         _asciiData.buffer = malloc(length);
@@ -268,7 +271,7 @@ static iTermObjectPool *gPool;
         _asciiData.buffer = _asciiData.staticBuffer;
     }
     memcpy(_asciiData.buffer, bytes, length);
-    
+
     [self preInitializeScreenChars];
 }
 

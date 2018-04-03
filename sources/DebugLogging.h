@@ -7,10 +7,25 @@
 //
 
 #import <Foundation/Foundation.h>
+#include <assert.h>
 
 extern BOOL gDebugLogging;
 
 #define USE_STOPWATCH 0
+
+#define ENABLE_EXTRA_DEBUGGING 0
+#if ENABLE_EXTRA_DEBUGGING
+#define ITExtraDebugAssert assert
+#else
+#define ITExtraDebugAssert(condition)
+#endif
+
+#if ITERM_DEBUG
+#define ITDebugAssert assert
+#else
+// Cast condition to void to avoid unused variable warnings.
+#define ITDebugAssert(condition) ((void)(condition))
+#endif
 
 #if !ITERM_DEBUG && USE_STOPWATCH
 #define STOPWATCH_START(name) \
@@ -97,7 +112,7 @@ extern BOOL gDebugLogging;
       ELog(args); \
       if (TurnOffDebugLoggingSilently()) { \
         dispatch_async(dispatch_get_main_queue(), ^{ \
-          NSAlert *alert = [[[NSAlert alloc] init] autorelease]; \
+          NSAlert *alert = [[NSAlert alloc] init]; \
           alert.messageText = @"Critical Error"; \
           alert.informativeText =  @"A critical error occurred and a debug log was created. Please send /tmp/debuglog.txt to the developers."; \
           [alert addButtonWithTitle:@"OK"]; \
@@ -106,6 +121,40 @@ extern BOOL gDebugLogging;
       } \
     } \
   } while (0)
+
+#define IT_STRINGIFY(x) #x
+
+#if BETA
+#define ITBetaAssert(condition, args...) \
+  do { \
+    if (!(condition)) { \
+      DLog(@"Crashing because %s from:\n%@", #condition, [NSThread callStackSymbols]); \
+      ELog(args); \
+      assert(NO); \
+    } \
+  } while (0)
+#else  // BETA
+#define ITBetaAssert(condition, args...) \
+  do { \
+    if (!(condition)) { \
+      ELog(@"BETA ASSERT: Failed beta assert because %s from:\n%@", #condition, [NSThread callStackSymbols]); \
+      ELog(args); \
+    } \
+  } while (0)
+#endif
+
+#if BETA
+#define ITConservativeBetaAssert(condition, args...) \
+  do { \
+    if (!(condition)) { \
+      DLog(@"Crashing because %s from:\n%@", #condition, [NSThread callStackSymbols]); \
+      ELog(args); \
+      assert(NO); \
+    } \
+  } while (0)
+#else  // BETA
+#define ITConservativeBetaAssert(condition, args...)
+#endif
 
 void ToggleDebugLogging(void);
 int DebugLogImpl(const char *file, int line, const char *function, NSString* value);

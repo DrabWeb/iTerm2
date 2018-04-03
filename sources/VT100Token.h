@@ -95,6 +95,7 @@ typedef enum {
     VT100CSI_RESET_MODIFIERS,       // CSI > Ps n (Set all modifiers values to -1, disabled)
     VT100CSI_DECSLRM,               // Set left-right margin
     VT100CSI_DECRQCRA,              // Request Checksum of Rectangular Area
+    VT100CSI_REP,                   // Repeat
 
     // some xterm extensions
     XTERMCC_WIN_TITLE,            // Set window title
@@ -130,6 +131,8 @@ typedef enum {
     XTERMCC_PROPRIETARY_ETERM_EXT,
     XTERMCC_PWD_URL,
     XTERMCC_LINK,
+    XTERMCC_TEXT_FOREGROUND_COLOR,
+    XTERMCC_TEXT_BACKGROUND_COLOR,
     XTERMCC_SET_PALETTE,
     XTERMCC_SET_KVP,
     // OSC 1337;File=(args):(data) gets changed by the parser from XTERMCC_SET_KVP to a

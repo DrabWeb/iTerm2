@@ -54,7 +54,7 @@ static NSString *kCommandIsLastInList = @"lastInList";
     BOOL detachSent_;
     BOOL acceptNotifications_;  // Initially NO. When YES, respond to notifications.
     NSMutableString *strayMessages_;
-    
+
     // When we get the first %begin-%{end,error} we notify the delegate. Until that happens, this is
     // set to NO.
     BOOL _initialized;
@@ -479,6 +479,12 @@ error:
         if (acceptNotifications_) [self parseSessionsChangedCommand:command];
     } else if ([command hasPrefix:@"%noop"]) {
         TmuxLog(@"tmux noop: %@", command);
+    } else if ([command hasPrefix:@"%window-pane-changed"] ||  // active pane changed
+               [command hasPrefix:@"%session-window-changed"] ||  // active window changed
+               [command hasPrefix:@"%client-session-changed"] ||  // client is now attached to a new session
+               [command hasPrefix:@"%pane-mode-changed"]) {  // copy mode, etc
+        // New in tmux 2.5. Don't care.
+        TmuxLog(@"Ignore %@", command);
     } else if ([command hasPrefix:@"%exit "] ||
                [command isEqualToString:@"%exit"]) {
         TmuxLog(@"tmux exit message: %@", command);
@@ -506,7 +512,7 @@ error:
             [self hostDisconnected];
         } else {
             // We'll be tolerant of unrecognized commands.
-            NSLog(@"Unrecognized command \"%@\"", command);
+            DLog(@"Unrecognized command \"%@\"", command);
             [strayMessages_ appendFormat:@"%@\n", command];
         }
     }
@@ -558,7 +564,7 @@ error:
     if (!codePoints.count) {
         return;
     }
-    
+
     if (![self serverAcceptsSurrogatePairs]) {
         NSString *string = [self firstSupplementaryPlaneCharacterInArray:codePoints];
         if (string) {
@@ -566,7 +572,7 @@ error:
             return;
         }
     }
-    
+
     // Send multiple small send-keys commands because commands longer than 1024 bytes crash tmux 1.8.
     NSMutableArray *commands = [NSMutableArray array];
     const NSUInteger stride = 80;

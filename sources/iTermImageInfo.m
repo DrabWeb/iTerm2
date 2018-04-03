@@ -92,10 +92,10 @@ NSString *const iTermImageDidLoad = @"iTermImageDidLoad";
         }
         return;
     }
-    
+
     [_dictionary release];
     _dictionary = nil;
-    
+
     DLog(@"Queueing load of %@", self.uniqueIdentifier);
     void (^block)(void) = ^{
         // This is a slow operation that blocks for a long time.
@@ -231,13 +231,25 @@ NSString *const iTermImageDidLoad = @"iTermImageDidLoad";
 }
 
 - (NSImage *)imageWithCellSize:(CGSize)cellSize {
-    if (!self.image && !self.animatedImage) {
+    return [self imageWithCellSize:cellSize timestamp:[NSDate timeIntervalSinceReferenceDate]];
+}
+
+- (int)frameForTimestamp:(NSTimeInterval)timestamp {
+    return [self.animatedImage frameForTimestamp:timestamp];
+}
+
+- (BOOL)ready {
+    return (self.image || self.animatedImage);
+
+}
+- (NSImage *)imageWithCellSize:(CGSize)cellSize timestamp:(NSTimeInterval)timestamp {
+    if (!self.ready) {
         return nil;
     }
     if (!_embeddedImages) {
         _embeddedImages = [[NSMutableDictionary alloc] init];
     }
-    int frame = self.animatedImage.currentFrame;  // 0 if not animated
+    int frame = [self.animatedImage frameForTimestamp:timestamp];  // 0 if not animated
     NSImage *embeddedImage = _embeddedImages[@(frame)];
 
     NSSize region = NSMakeSize(cellSize.width * _size.width,

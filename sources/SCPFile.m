@@ -137,7 +137,7 @@ static NSError *SCPFileError(NSString *description) {
 - (NSString *)hostname {
     NSArray *hostComponents = [self.path.hostname componentsSeparatedByString:@":"];
     NSInteger components = [hostComponents count];
-    
+
     // Check if the host is {hostname}:{port} or {IPv4}:{port}
     if (components == 2) {
         return hostComponents[0];
@@ -149,19 +149,19 @@ static NSError *SCPFileError(NSString *description) {
         NSString *bracketedHostname = [hostComponents componentsJoinedByString:@":"];
         return [bracketedHostname substringWithRange:NSMakeRange(1, bracketedHostname.length - 2)];
     }
-    
+
     return self.path.hostname;
 }
 
 - (int)port {
     NSArray *hostComponents = [self.path.hostname componentsSeparatedByString:@":"];
     NSInteger components = [hostComponents count];
-    
+
     // Check if the host is {hostname}:{port} or {IPv4}:{port}
     if (components == 2) {
         NSNumberFormatter *formatter = [[[NSNumberFormatter alloc] init] autorelease];
         [formatter setLocale:[[[NSLocale alloc] initWithLocaleIdentifier:@"en_US"] autorelease]];
-        
+
         return [[formatter numberFromString:[hostComponents lastObject]] intValue];
     } else if (components >= 4 &&
                [hostComponents[0] hasPrefix:@"["] &&
@@ -169,10 +169,10 @@ static NSError *SCPFileError(NSString *description) {
         // Check if the host is [{IPv6}]:{port}
         NSNumberFormatter *formatter = [[[NSNumberFormatter alloc] init] autorelease];
         [formatter setLocale:[[[NSLocale alloc] initWithLocaleIdentifier:@"en_US"] autorelease]];
-        
+
         return [[formatter numberFromString:[hostComponents lastObject]] intValue];
     }
-    
+
     // If no port was defined, use 22 by default
     return 22;
 }
@@ -244,13 +244,16 @@ static NSError *SCPFileError(NSString *description) {
         return;
     }
     _okToAdd = NO;
+    int effectivePort;
     if (self.session) {
         self.session.delegate = self;
+        effectivePort = self.session.port.intValue;
     } else {
         self.session = [[[NMSSHSession alloc] initWithHost:[self hostname]
                                                    configs:[self configs]
                                            withDefaultPort:[self port]
                                            defaultUsername:self.path.username] autorelease];
+        effectivePort = self.session.port.intValue;
         self.session.delegate = self;
         [self.session connect];
         if (self.stopped) {
@@ -276,7 +279,7 @@ static NSError *SCPFileError(NSString *description) {
             [[FileTransferManager sharedInstance] transferrableFile:self
                                      didFinishTransmissionWithError:theError];
             iTermWarningSelection selection =
-                [iTermWarning showWarningWithTitle:[NSString stringWithFormat:@"Failed to connect to %@:%d. Double-check that the host name is correct.", self.hostname, self.port]
+                [iTermWarning showWarningWithTitle:[NSString stringWithFormat:@"Failed to connect to %@:%d. Double-check that the host name is correct.", self.hostname, effectivePort]
                                            actions:@[ @"Ok", @"Help" ]
                                      actionMapping:nil
                                          accessory:nil
@@ -343,7 +346,7 @@ static NSError *SCPFileError(NSString *description) {
                 if (self.stopped) {
                     break;
                 }
-                
+
                 NSMutableArray *keyPaths = [NSMutableArray array];
                 if (self.session.hostConfig.identityFiles.count) {
                     [keyPaths addObjectsFromArray:self.session.hostConfig.identityFiles];
@@ -378,7 +381,7 @@ static NSError *SCPFileError(NSString *description) {
                     [self.session authenticateByPublicKey:publicKeyPath
                                                privateKey:keyPath
                                               andPassword:password];
-                
+
                     if (self.session.isAuthorized) {
                         XLog(@"Authorized!");
                         break;
@@ -423,7 +426,7 @@ static NSError *SCPFileError(NSString *description) {
         });
         return;
     }
-    
+
     if (_okToAdd) {
         [self.session addKnownHostName:self.session.host
                                   port:[self.session.port intValue]
@@ -588,7 +591,7 @@ static NSError *SCPFileError(NSString *description) {
     self.fileSize = [[[NSFileManager defaultManager] attributesOfItemAtPath:self.localPath error:nil] fileSize];
     [[[FileTransferManager sharedInstance] files] addObject:self];
     [[FileTransferManager sharedInstance] transferrableFileDidStartTransfer:self];
-    
+
     if (!self.hasPredecessor) {
         dispatch_async(_queue, ^() {
             [self performTransferWrapper:NO];
@@ -619,7 +622,7 @@ static NSError *SCPFileError(NSString *description) {
                                                      @"DSA key fingerprint is %@. Connect anyway?",
                            session.host, fingerprint];
                 break;
-                
+
             case NMSSHKnownHostStatusMatch:
                 result = YES;
                 message = nil;
@@ -634,7 +637,7 @@ static NSError *SCPFileError(NSString *description) {
                                                @"It is also possible that a host key has just been changed.\nConnect anyway?",
                      session.host, fingerprint];
                 break;
-                
+
             case NMSSHKnownHostStatusNotFound:
                 title = [NSString stringWithFormat:@"First time connecting to %@", session.host];
                 message =

@@ -7,7 +7,7 @@
  **
  **  Project: iTerm
  **
- **  Description: overrides sendEvent: so that key mappings with command mask  
+ **  Description: overrides sendEvent: so that key mappings with command mask
  **               are handled properly.
  **
  **  This program is free software; you can redistribute it and/or modify
@@ -44,6 +44,8 @@
 #import "PTYTab.h"
 #import "PTYTextView.h"
 #import "PTYWindow.h"
+
+unsigned short iTermBogusVirtualKeyCode = 0xffff;
 
 @interface iTermApplication()
 @property(nonatomic, retain) NSStatusItem *statusBarItem;
@@ -98,6 +100,9 @@
 
 - (BOOL)routeEventToShortcutInputView:(NSEvent *)event {
     NSResponder *firstResponder = [[NSApp keyWindow] firstResponder];
+    if (event.keyCode == iTermBogusVirtualKeyCode) {
+        return YES;
+    }
     if ([firstResponder isKindOfClass:[iTermShortcutInputView class]]) {
         iTermShortcutInputView *shortcutView = (iTermShortcutInputView *)firstResponder;
         if (shortcutView) {
@@ -381,17 +386,18 @@
         dispatch_async(dispatch_get_main_queue(), ^{
             [[NSApplication sharedApplication] activateIgnoringOtherApps:YES];
         });
-        
-        NSImage *image = [NSImage imageNamed:@"StatusItem"];
-        self.statusBarItem = [[[NSStatusBar systemStatusBar] statusItemWithLength:image.size.width] retain];
-        _statusBarItem.title = @"";
-        _statusBarItem.image = image;
-        _statusBarItem.alternateImage = [NSImage imageNamed:@"StatusItemAlt"];
-        _statusBarItem.highlightMode = YES;
-        
-        _statusBarItem.menu = [[self delegate] statusBarMenu];
-        
-    } else {
+
+        if ([iTermAdvancedSettingsModel statusBarIcon]) {
+            NSImage *image = [NSImage imageNamed:@"StatusItem"];
+            self.statusBarItem = [[[NSStatusBar systemStatusBar] statusItemWithLength:image.size.width] retain];
+            _statusBarItem.title = @"";
+            _statusBarItem.image = image;
+            _statusBarItem.alternateImage = [NSImage imageNamed:@"StatusItemAlt"];
+            _statusBarItem.highlightMode = YES;
+
+            _statusBarItem.menu = [[self delegate] statusBarMenu];
+        }
+    } else if (_statusBarItem != nil) {
         [[NSStatusBar systemStatusBar] removeStatusItem:_statusBarItem];
         self.statusBarItem = nil;
     }
@@ -405,6 +411,27 @@
 - (NSArray<NSWindow *> *)orderedWindowsPlusAllHotkeyPanels {
     NSArray<NSWindow *> *panels = [[iTermHotKeyController sharedInstance] allFloatingHotkeyWindows] ?: @[];
     return [panels arrayByAddingObjectsFromArray:[self orderedWindows]];
+}
+
+- (void)activateAppWithCompletion:(void (^)(void))completion {
+    DLog(@"Activate with completion...");
+    if ([self isActive]) {
+        DLog(@"Application already active. Run completion block synchronously");
+        completion();
+    } else {
+        __block id observer;
+        DLog(@"Register an observer");
+        observer = [[NSNotificationCenter defaultCenter] addObserverForName:NSApplicationDidBecomeActiveNotification
+                                                                     object:nil
+                                                                      queue:NULL
+                                                                 usingBlock:^(NSNotification * _Nonnull note) {
+                                                                     DLog(@"Application did become active. Invoke completion block");
+                                                                     completion();
+                                                                     DLog(@"Application did become active completion block finished. Removing observer.");
+                                                                     [[NSNotificationCenter defaultCenter] removeObserver:observer];
+                                                                 }];
+        [self activateIgnoringOtherApps:YES];
+    }
 }
 
 @end

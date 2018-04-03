@@ -58,7 +58,8 @@ extern NSString *kCoprocessStatusChangeNotification;
 
 - (instancetype)init;
 - (BOOL)hasBrokenPipe;
-- (NSString *)command;
+// Command the profile was created with. nil for login shell or whatever's in the command field of the profile otherwise.
+- (NSString *)originalCommand;
 - (void)launchWithPath:(NSString*)progpath
              arguments:(NSArray*)args
            environment:(NSDictionary*)env
@@ -70,7 +71,7 @@ extern NSString *kCoprocessStatusChangeNotification;
 
 - (void)writeTask:(NSData*)data;
 
-- (void)sendSignal:(int)signo;
+- (void)sendSignal:(int)signo toServer:(BOOL)toServer;
 
 // Cause the slave to receive a SIGWINCH and change the tty's window size. If `size` equals the
 // tty's current window size then no action is taken.

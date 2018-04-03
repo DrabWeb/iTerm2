@@ -59,6 +59,9 @@ extern NSString *const iTermImageDidLoad;
 // Is this a broken image?
 @property(nonatomic) BOOL broken;
 
+// Is there an image yet? one might be coming later
+@property (nonatomic, readonly) BOOL ready;
+
 // Used to create a new instance for a new image. This may remain an empty container until
 // -setImageFromImage: is called.
 - (instancetype)initWithCode:(unichar)code;
@@ -70,6 +73,9 @@ extern NSString *const iTermImageDidLoad;
 // there will be a transparent area around the edges.
 - (NSImage *)imageWithCellSize:(CGSize)cellSize;
 
+// A more predictable version of the above. Timestamp determines GIF frame.
+- (NSImage *)imageWithCellSize:(CGSize)cellSize timestamp:(NSTimeInterval)timestamp;
+
 // Binds an image. Data is optional and only used for animated GIFs. Not to be used after
 // -initWithDictionary.
 - (void)setImageFromImage:(iTermImage *)image data:(NSData *)data;
@@ -79,5 +85,8 @@ extern NSString *const iTermImageDidLoad;
 
 // Format inferred from extension
 - (void)saveToFile:(NSString *)filename;
+
+// Always returns 0 for non-animated images.
+- (int)frameForTimestamp:(NSTimeInterval)timestamp;
 
 @end

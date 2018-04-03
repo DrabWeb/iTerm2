@@ -30,7 +30,6 @@ static const CGFloat kMaximumToolbeltSizeAsFractionOfWindow = 0.5;
 @property(nonatomic, retain) SolidColorView *divisionView;
 @property(nonatomic, retain) iTermToolbeltView *toolbelt;
 @property(nonatomic, retain) iTermDragHandleView *leftTabBarDragHandle;
-@property(nonatomic, readonly) CGFloat leftTabBarPreferredWidth;
 
 @end
 
@@ -51,9 +50,10 @@ static const CGFloat kMaximumToolbeltSizeAsFractionOfWindow = 0.5;
         self.autoresizesSubviews = YES;
         _leftTabBarPreferredWidth = [iTermPreferences doubleForKey:kPreferenceKeyLeftTabBarWidth];
         [self setLeftTabBarWidthFromPreferredWidth];
-        
+
         // Create the tab view.
         self.tabView = [[[PTYTabView alloc] initWithFrame:self.bounds] autorelease];
+        self.tabView.drawsBackground = !_useMetal;
         _tabView.autoresizingMask = (NSViewWidthSizable | NSViewHeightSizable);
         _tabView.autoresizesSubviews = YES;
         _tabView.allowsTruncatedLabels = NO;
@@ -120,6 +120,25 @@ static const CGFloat kMaximumToolbeltSizeAsFractionOfWindow = 0.5;
     [super dealloc];
 }
 
+- (void)drawRect:(NSRect)dirtyRect {
+    if (_useMetal) {
+        return;
+    } else {
+        [super drawRect:dirtyRect];
+    }
+}
+
+- (void)setUseMetal:(BOOL)useMetal {
+    _useMetal = useMetal;
+    self.tabView.drawsBackground = !_useMetal;
+
+    [_divisionView removeFromSuperview];
+    [_divisionView release];
+    _divisionView = nil;
+
+    [self updateDivisionView];
+}
+
 #pragma mark - Division View
 
 - (void)updateDivisionView {
@@ -131,13 +150,27 @@ static const CGFloat kMaximumToolbeltSizeAsFractionOfWindow = 0.5;
                                               self.bounds.size.width,
                                               kDivisionViewHeight);
         if (!_divisionView) {
-            _divisionView = [[SolidColorView alloc] initWithFrame:divisionViewFrame];
+            Class theClass = _useMetal ? [iTermLayerBackedSolidColorView class] : [SolidColorView class];
+            _divisionView = [[theClass alloc] initWithFrame:divisionViewFrame];
             _divisionView.autoresizingMask = (NSViewWidthSizable | NSViewMinYMargin);
             [self addSubview:_divisionView];
         }
-        _divisionView.color = self.window.isKeyWindow
-                ? [NSColor colorWithCalibratedHue:1 saturation:0 brightness:0.49 alpha:1]
-                : [NSColor colorWithCalibratedHue:1 saturation:0 brightness:0.65 alpha:1];
+        switch ([iTermPreferences intForKey:kPreferenceKeyTabStyle]) {
+            case TAB_STYLE_LIGHT:
+            case TAB_STYLE_LIGHT_HIGH_CONTRAST:
+                _divisionView.color = self.window.isKeyWindow
+                        ? [NSColor colorWithCalibratedHue:1 saturation:0 brightness:0.49 alpha:1]
+                        : [NSColor colorWithCalibratedHue:1 saturation:0 brightness:0.65 alpha:1];
+                break;
+
+            case TAB_STYLE_DARK:
+            case TAB_STYLE_DARK_HIGH_CONTRAST:
+                _divisionView.color = self.window.isKeyWindow
+                        ? [NSColor colorWithCalibratedHue:1 saturation:0 brightness:0.2 alpha:1]
+                        : [NSColor colorWithCalibratedHue:1 saturation:0 brightness:0.15 alpha:1];
+                break;
+        }
+
         _divisionView.frame = divisionViewFrame;
     } else if (_divisionView) {
         // Remove existing division
@@ -280,6 +313,10 @@ static const CGFloat kMaximumToolbeltSizeAsFractionOfWindow = 0.5;
         DLog(@"repositionWidgets - Set tab view frame to %@", NSStringFromRect(tabViewFrame));
         [self.tabView setFrame:tabViewFrame];
         [self updateDivisionView];
+
+        // Even though it's not visible it needs an accurate number so we can compute the proper
+        // window size when it appears.
+        [self setLeftTabBarWidthFromPreferredWidth];
     } else {
         // The tabBar control is visible.
         DLog(@"repositionWidgets - tabs are visible. Adjusting window size...");
@@ -395,7 +432,7 @@ static const CGFloat kMaximumToolbeltSizeAsFractionOfWindow = 0.5;
                 }
                 self.tabView.frame = tabViewFrame;
                 [self updateDivisionView];
-                
+
                 const CGFloat dragHandleWidth = 3;
                 NSRect leftTabBarDragHandleFrame = NSMakeRect(NSMaxX(self.tabBarControl.frame) - dragHandleWidth,
                                                               0,
@@ -428,7 +465,7 @@ static const CGFloat kMaximumToolbeltSizeAsFractionOfWindow = 0.5;
     [self.tabBarControl setStretchCellsToFit:[iTermPreferences boolForKey:kPreferenceKeyStretchTabsToFillBar]];
     [self.tabBarControl setCellOptimumWidth:[iTermAdvancedSettingsModel optimumTabWidth]];
     self.tabBarControl.smartTruncation = [iTermAdvancedSettingsModel tabTitlesUseSmartTruncation];
-    
+
     DLog(@"repositionWidgets - redraw view");
     // Note: this used to call setNeedsDisplay on each session in the current tab.
     [self setNeedsDisplay:YES];
@@ -438,14 +475,31 @@ static const CGFloat kMaximumToolbeltSizeAsFractionOfWindow = 0.5;
     DLog(@"repositionWidgets - return.");
 }
 
-- (CGFloat)leftTabBarWidthForPreferredWidth:(CGFloat)preferredWidth {
+- (CGFloat)leftTabBarWidthForPreferredWidth:(CGFloat)preferredWidth contentWidth:(CGFloat)contentWidth {
     const CGFloat minimumWidth = 50;
-    const CGFloat maximumWidth = self.bounds.size.width / 3;
-    return  MAX(MIN(maximumWidth, preferredWidth), minimumWidth);
+    const CGFloat maximumWidth = contentWidth / 3;
+    return MAX(MIN(maximumWidth, preferredWidth), minimumWidth);
+}
+
+- (CGFloat)leftTabBarWidthForPreferredWidth:(CGFloat)preferredWidth {
+    return [self leftTabBarWidthForPreferredWidth:preferredWidth contentWidth:self.bounds.size.width];
 }
 
 - (void)setLeftTabBarWidthFromPreferredWidth {
     _leftTabBarWidth = [self leftTabBarWidthForPreferredWidth:_leftTabBarPreferredWidth];
+}
+
+- (void)willShowTabBar {
+    const CGFloat minimumWidth = 50;
+    // Given that the New window width (N) = Tab bar width (T) + Content Size (C)
+    // Given that T < N/3 (by leftTabBarWidthForPreferredWidth):
+    // T <= N / 3
+    // T <= 1/3(T+C)
+    // T <= T/3 + C/3
+    // 2/3T <= C/3
+    // T <= C/2
+    const CGFloat maximumWidth = self.bounds.size.width / 2;
+    _leftTabBarWidth = MAX(MIN(maximumWidth, _leftTabBarPreferredWidth), minimumWidth);
 }
 
 #pragma mark - iTermTabBarControlViewDelegate

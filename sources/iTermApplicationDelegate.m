@@ -55,6 +55,7 @@
 #import "iTermOpenQuicklyWindowController.h"
 #import "iTermOrphanServerAdopter.h"
 #import "iTermPasswordManagerWindowController.h"
+#import "iTermPreciseTimer.h"
 #import "iTermPreferences.h"
 #import "iTermPromptOnCloseReason.h"
 #import "iTermProfilePreferences.h"
@@ -89,7 +90,7 @@
 #import "TmuxDashboardController.h"
 #import "ToastWindowController.h"
 #import "VT100Terminal.h"
-
+#import "iTermSubpixelModelBuilder.h"
 #import <Quartz/Quartz.h>
 #import <objc/runtime.h>
 
@@ -162,10 +163,12 @@ static const NSTimeInterval kOneMonth = 30 * 24 * 60 * 60;
     IBOutlet NSMenuItem *windowArrangements_;
     IBOutlet NSMenuItem *windowArrangementsAsTabs_;
     IBOutlet NSMenu *_buriedSessions;
+    NSMenu *_statusIconBuriedSessions;  // unsafe unretained
 
     IBOutlet NSMenuItem *showFullScreenTabs;
     IBOutlet NSMenuItem *useTransparency;
     IBOutlet NSMenuItem *maximizePane;
+    IBOutlet SUUpdater * suUpdater;
     IBOutlet NSMenuItem *_showTipOfTheDay;  // Here because we must remove it for older OS versions.
     BOOL secureInputDesired_;
     BOOL quittingBecauseLastWindowClosed_;
@@ -200,6 +203,9 @@ static const NSTimeInterval kOneMonth = 30 * 24 * 60 * 60;
     NSMutableDictionary<id, ITMNotificationRequest *> *_terminateSessionSubscriptions;
     NSMutableDictionary<id, ITMNotificationRequest *> *_layoutChangeSubscriptions;
     BOOL _layoutChanged;
+
+    // Location of mouse when the app became inactive.
+    NSPoint _savedMouseLocation;
 }
 
 - (instancetype)init {
@@ -306,7 +312,7 @@ static const NSTimeInterval kOneMonth = 30 * 24 * 60 * 60;
     ColorsMenuItemView *labelTrackView = [[[ColorsMenuItemView alloc]
                                            initWithFrame:NSMakeRect(0, 0, 180, 50)] autorelease];
     [self addMenuItemView:labelTrackView toMenu:viewMenu title:@"Current Tab Color"];
-    
+
     if (![iTermTipController sharedInstance]) {
         [_showTipOfTheDay.menu removeItem:_showTipOfTheDay];
     }
@@ -334,6 +340,8 @@ static const NSTimeInterval kOneMonth = 30 * 24 * 60 * 60;
         return YES;
     } else if ([menuItem action] == @selector(makeDefaultTerminal:)) {
         return ![[iTermLaunchServices sharedInstance] iTermIsDefaultTerminal];
+    } else if ([menuItem action] == @selector(checkForIncompatibleSoftware:)) {
+        return YES;
     } else if (menuItem == maximizePane) {
         if ([[[iTermController sharedInstance] currentTerminal] inInstantReplay]) {
             // Things get too complex if you allow this. It crashes.
@@ -453,12 +461,23 @@ static const NSTimeInterval kOneMonth = 30 * 24 * 60 * 60;
 }
 
 - (void)updateBuriedSessionsMenu {
-    [_buriedSessions removeAllItems];
+    [self updateBuriedSessionsMenu:_buriedSessions];
+    [self updateBuriedSessionsMenu:_statusIconBuriedSessions];
+}
+
+- (void)updateBuriedSessionsMenu:(NSMenu *)menu {
+    if (!menu) {
+        return;
+    }
+    [menu removeAllItems];
     for (PTYSession *session in [[iTermBuriedSessions sharedInstance] buriedSessions]) {
         NSMenuItem *item = [[[NSMenuItem alloc] initWithTitle:session.name action:@selector(disinter:) keyEquivalent:@""] autorelease];
         item.representedObject = session;
-        [_buriedSessions addItem:item];
+        [menu addItem:item];
     }
+    [[menu.supermenu.itemArray objectPassingTest:^BOOL(NSMenuItem *element, NSUInteger index, BOOL *stop) {
+        return element.submenu == menu;
+    }] setEnabled:menu.itemArray.count > 0];
 }
 
 - (void)disinter:(NSMenuItem *)menuItem {
@@ -587,9 +606,9 @@ static const NSTimeInterval kOneMonth = 30 * 24 * 60 * 60;
             if (filename) {
                 NSString *initialText = bookmark[KEY_INITIAL_TEXT];
                 if (initialText && ![iTermAdvancedSettingsModel openFileOverridesSendText]) {
-                    initialText = [initialText stringByAppendingFormat:@"\n%@; exit\n", filename];
+                    initialText = [initialText stringByAppendingFormat:@"\n%@; exit", filename];
                 } else {
-                    initialText = [NSString stringWithFormat:@"%@; exit\n", filename];
+                    initialText = [NSString stringWithFormat:@"%@; exit", filename];
                 }
                 bookmark[KEY_INITIAL_TEXT] = initialText;
             }
@@ -865,6 +884,7 @@ static const NSTimeInterval kOneMonth = 30 * 24 * 60 * 60;
         DLog(@"Application resigning active. Disabling secure input.");
         [self setSecureInput:NO];
     }
+    _savedMouseLocation = [NSEvent mouseLocation];
 }
 
 - (void)applicationWillHide:(NSNotification *)aNotification {
@@ -882,31 +902,51 @@ static const NSTimeInterval kOneMonth = 30 * 24 * 60 * 60;
 
     // If focus follows mouse is on, find the window under the cursor and make it key. If a PTYTextView
     // is under the cursor make it first responder.
-    if ([iTermPreferences boolForKey:kPreferenceKeyFocusFollowsMouse]) {
+    NSPoint mouseLocation = [NSEvent mouseLocation];
+    if (!NSEqualPoints(mouseLocation, _savedMouseLocation) &&
+        [iTermPreferences boolForKey:kPreferenceKeyFocusFollowsMouse]) {
         NSRect mouseRect = {
             .origin = [NSEvent mouseLocation],
             .size = { 0, 0 }
         };
-        for (NSWindow *window in [[iTermApplication sharedApplication] orderedWindowsPlusVisibleHotkeyPanels]) {
-            if (!window.isOnActiveSpace) {
-                continue;
-            }
-            if (!window.isVisible) {
-                continue;
-            }
-            NSPoint pointInWindow = [window convertRectFromScreen:mouseRect].origin;
-            if ([window isTerminalWindow]) {
-                NSView *view = [window.contentView hitTest:pointInWindow];
+        // Dispatch async because when you cmd-tab into iTerm2 the windows are briefly
+        // out of order. Looks like an OS bug to me. They fix themselves right away,
+        // and a dispatch async seems to give it enough time to right itself before
+        // we iterate front to back.
+        dispatch_async(dispatch_get_main_queue(), ^{
+            [self selectWindowAtMouseRect:mouseRect];
+        });
+    }
+
+    [self hideStuckToolTips];
+    iTermPreciseTimerClearLogs();
+}
+
+- (void)selectWindowAtMouseRect:(NSRect)mouseRect {
+    NSArray<NSWindow *> *frontToBackWindows = [[iTermApplication sharedApplication] orderedWindowsPlusVisibleHotkeyPanels];
+    for (NSWindow *window in frontToBackWindows) {
+        if (!window.isOnActiveSpace) {
+            continue;
+        }
+        if (!window.isVisible) {
+            continue;
+        }
+        NSPoint pointInWindow = [window convertRectFromScreen:mouseRect].origin;
+        if ([window isTerminalWindow]) {
+            DLog(@"Consider window %@", window.title);
+            NSView *view = [window.contentView hitTest:pointInWindow];
+            if (view) {
+                DLog(@"Will activate %@", window.title);
                 [window makeKeyAndOrderFront:nil];
                 if ([view isKindOfClass:[PTYTextView class]]) {
                     [window makeFirstResponder:view];
                 }
-                break;
+                return;
+            } else {
+                DLog(@"%@ failed hit test", window.title);
             }
         }
     }
-    
-    [self hideStuckToolTips];
 }
 
 - (void)applicationWillFinishLaunching:(NSNotification *)aNotification {
@@ -1067,13 +1107,27 @@ static const NSTimeInterval kOneMonth = 30 * 24 * 60 * 60;
 - (NSMenu *)statusBarMenu {
     NSMenu *menu = [[NSMenu alloc] init];
     NSMenuItem *item;
+
     item = [[[NSMenuItem alloc] initWithTitle:@"Preferences"
                                        action:@selector(showAndOrderFrontRegardlessPrefWindow:)
                                 keyEquivalent:@""] autorelease];
     [menu addItem:item];
-    
+
     item = [[[NSMenuItem alloc] initWithTitle:@"Bring All Windows to Front"
                                        action:@selector(arrangeInFront:)
+                                keyEquivalent:@""] autorelease];
+    [menu addItem:item];
+
+    item = [[[NSMenuItem alloc] init] autorelease];
+    _statusIconBuriedSessions = [[[NSMenu alloc] init] autorelease];
+    item.submenu = _statusIconBuriedSessions;
+    item.title = @"Buried Sessions";
+    [menu addItem:item];
+
+    [self updateBuriedSessionsMenu:_statusIconBuriedSessions];
+
+    item = [[[NSMenuItem alloc] initWithTitle:@"Check For Updates"
+                                       action:@selector(checkForUpdatesFromMenu:)
                                 keyEquivalent:@""] autorelease];
     [menu addItem:item];
 
@@ -1259,7 +1313,7 @@ static const NSTimeInterval kOneMonth = 30 * 24 * 60 * 60;
     if ([NSBundle it_isNightlyBuild]) {
         return;
     }
-    
+
     const BOOL inBeta = [iTermPreferences boolForKey:kPreferenceKeyCheckForTestReleases];
     if (!inBeta) {
         return;
@@ -1376,7 +1430,7 @@ static const NSTimeInterval kOneMonth = 30 * 24 * 60 * 60;
     // LaunchBar: https://twitter.com/launchbar/status/620975715278790657?cn=cmVwbHk%3D&refsrc=email
     // Pathfinder: https://twitter.com/gnachman/status/659409608642007041
     // Tower: Filed a bug. Tracking with issue 4722 on my side
-    
+
     // This is disabled because it looks like everyone is there or almost there. I can remove this
     // code soon.
 //#define SHOW_INCOMPATIBILITY_WARNING_AT_STARTUP
@@ -1463,7 +1517,7 @@ static const NSTimeInterval kOneMonth = 30 * 24 * 60 * 60;
                               upgradeAvailable:NO];
         found = YES;
     }
-    
+
     [[NSUserDefaults standardUserDefaults] setBool:YES forKey:kHaveWarnedAboutIncompatibleSoftware];
     return found;
 }
@@ -1476,6 +1530,17 @@ static const NSTimeInterval kOneMonth = 30 * 24 * 60 * 60;
         [alert addButtonWithTitle:@"OK"];
         [alert runModal];
     }
+}
+
+- (IBAction)copyPerformanceStats:(id)sender {
+    NSString *copyString = iTermPreciseTimerGetSavedLogs();
+    NSPasteboard *pboard = [NSPasteboard generalPasteboard];
+    [pboard declareTypes:[NSArray arrayWithObject:NSStringPboardType] owner:self];
+    [pboard setString:copyString forType:NSStringPboardType];
+}
+
+- (IBAction)checkForUpdatesFromMenu:(id)sender {
+    [suUpdater checkForUpdates:(sender)];
 }
 
 - (void)warnAboutChangeToDefaultPasteBehavior {
@@ -1939,6 +2004,14 @@ static const NSTimeInterval kOneMonth = 30 * 24 * 60 * 60;
     [[NSWorkspace sharedWorkspace] openURL:[NSURL URLWithString:@"https://www.iterm2.com/documentation.html"]];
 }
 
+- (void)addFile:(NSString *)file toScriptMenu:(NSMenu *)scriptMenu {
+    NSMenuItem *scriptItem = [[[NSMenuItem alloc] initWithTitle:file
+                                                         action:@selector(launchScript:)
+                                                  keyEquivalent:@""] autorelease];
+    [scriptItem setTarget:[iTermController sharedInstance]];
+    [scriptMenu addItem:scriptItem];
+}
+
 - (IBAction)buildScriptMenu:(id)sender {
     static NSString *kScriptTitle = @"Scripts";
     static const int kScriptMenuItemIndex = 5;
@@ -1950,14 +2023,14 @@ static const NSTimeInterval kOneMonth = 30 * 24 * 60 * 60;
     NSMenuItem *scriptMenuItem = [[[NSMenuItem alloc] initWithTitle:kScriptTitle action: nil keyEquivalent: @""] autorelease];
 
     // create submenu
-    int count = 0;
-    NSMenu *scriptMenu = [[NSMenu alloc] initWithTitle:kScriptTitle];
-    [scriptMenuItem setSubmenu: scriptMenu];
+    NSMenu *scriptMenu = [[[NSMenu alloc] initWithTitle:kScriptTitle] autorelease];
+    [scriptMenuItem setSubmenu:scriptMenu];
     // populate the submenu with ascripts found in the script directory
     NSString *scriptsPath = [[NSFileManager defaultManager] scriptsPath];
     NSDirectoryEnumerator *directoryEnumerator =
         [[NSFileManager defaultManager] enumeratorAtPath:scriptsPath];
     NSWorkspace *workspace = [NSWorkspace sharedWorkspace];
+    NSMutableArray<NSString *> *files = [NSMutableArray array];
     for (NSString *file in directoryEnumerator) {
         NSString *path = [scriptsPath stringByAppendingPathComponent:file];
         if ([workspace isFilePackageAtPath:path]) {
@@ -1965,29 +2038,21 @@ static const NSTimeInterval kOneMonth = 30 * 24 * 60 * 60;
         }
         if ([[file pathExtension] isEqualToString:@"scpt"] ||
             [[file pathExtension] isEqualToString:@"app"] ) {
-            NSMenuItem *scriptItem = [[NSMenuItem alloc] initWithTitle:file
-                                                                action:@selector(launchScript:)
-                                                         keyEquivalent:@""];
-            [scriptItem setTarget:[iTermController sharedInstance]];
-            [scriptMenu addItem:scriptItem];
-            count++;
-            [scriptItem release];
+            [files addObject:file];
         }
     }
-    if (count > 0) {
-            [scriptMenu addItem:[NSMenuItem separatorItem]];
-            NSMenuItem *scriptItem = [[NSMenuItem alloc] initWithTitle:@"Refresh"
-                                                                action:@selector(buildScriptMenu:)
-                                                         keyEquivalent:@""];
-            [scriptItem setTarget:self];
-            [scriptMenu addItem:scriptItem];
-            count++;
-            [scriptItem release];
+    [files sortUsingSelector:@selector(localizedCaseInsensitiveCompare:)];
+    for (NSString *file in files) {
+        [self addFile:file toScriptMenu:scriptMenu];
     }
-    [scriptMenu release];
+    if (files.count > 0) {
+        [scriptMenu addItem:[NSMenuItem separatorItem]];
+        NSMenuItem *scriptItem = [[[NSMenuItem alloc] initWithTitle:@"Refresh"
+                                                             action:@selector(buildScriptMenu:)
+                                                      keyEquivalent:@""] autorelease];
+        [scriptItem setTarget:self];
+        [scriptMenu addItem:scriptItem];
 
-    // add new menu item
-    if (count) {
         [[NSApp mainMenu] insertItem:scriptMenuItem atIndex:kScriptMenuItemIndex];
         [scriptMenuItem setTitle:kScriptTitle];
     }
@@ -2032,6 +2097,11 @@ static const NSTimeInterval kOneMonth = 30 * 24 * 60 * 60;
 
 - (IBAction)openDashboard:(id)sender {
     [[TmuxDashboardController sharedInstance] showWindow:nil];
+}
+
+- (IBAction)openSourceLicenses:(id)sender {
+    NSURL *url = [[NSBundle mainBundle] URLForResource:@"Licenses" withExtension:@"txt"];
+    [[NSWorkspace sharedWorkspace] openURL:url];
 }
 
 #pragma mark - Private

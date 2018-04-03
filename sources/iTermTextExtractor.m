@@ -261,6 +261,12 @@ const NSInteger kLongMaximumWordLength = 100000;
 // The maximum length is a rough guideline. You might get a word up to twice as long.
 - (VT100GridWindowedRange)rangeForWordAt:(VT100GridCoord)location
                            maximumLength:(NSInteger)maximumLength {
+    ITBetaAssert(location.y >= 0, @"Location has negative Y");
+    if (location.y < 0) {
+        return VT100GridWindowedRangeMake(VT100GridCoordRangeMake(-1, -1, -1, -1),
+                                          _logicalWindow.location, _logicalWindow.length);
+    }
+
     DLog(@"Compute range for word at %@, max length %@", VT100GridCoordDescription(location), @(maximumLength));
     DLog(@"These special chars will be treated as alphanumeric: %@", [iTermPreferences stringForKey:kPreferenceKeyCharactersConsideredPartOfAWordForSelection]);
 
@@ -348,7 +354,7 @@ const NSInteger kLongMaximumWordLength = 100000;
                                              windowTouchesRightMargin:windowTouchesRightMargin
                                                      ignoringNewlines:NO];
                        }];
-    
+
     // Search backward for the start of the word.
     theRange = VT100GridCoordRangeMake(0, 0, location.x, location.y);
 
@@ -418,7 +424,7 @@ const NSInteger kLongMaximumWordLength = 100000;
         DLog(@"An alphanumeric character was selected. Begin language-specific logic");
 
         // An alphanumeric character was selected. This is where it gets interesting.
-        
+
         // We have now retrieved the longest possible string that could have a word. This is because we
         // are more permissive than the OS about what can be in a word (the user can add punctuation,
         // for example, making foo/bar a word if / belongs to the “characters considered part of a
@@ -428,7 +434,7 @@ const NSInteger kLongMaximumWordLength = 100000;
 
         NSString *string = [stringBeforeLocation stringByAppendingString:stringFromLocation];
         NSAttributedString *attributedString = [[[NSAttributedString alloc] initWithString:string attributes:@{}] autorelease];
-        
+
         // Will be in 1:1 correspondence with `coords`.
         // The string in the cell at `coords[i]` starts at index `indexes[i]`.
         NSMutableArray<NSNumber *> *indexes = [NSMutableArray array];
@@ -469,9 +475,9 @@ const NSInteger kLongMaximumWordLength = 100000;
                 break;
             }
         }
-        
+
         // Same thing but in reverse.
-        
+
         NSInteger start;
         const NSUInteger numberOfCellsInPrefix = stringLengthsInPrefix.count;
 
@@ -507,7 +513,7 @@ const NSInteger kLongMaximumWordLength = 100000;
                   withValueLessThanOrEqualTo:location
                        searchingBackwardFrom:provisionalStart];
         }
-        
+
         //  Move back until two consecutive OS-defined words are found or we reach the start of the string.
         while (start > 0) {
             DLog(@"Consider start=%@ at %@", @(start-1), VT100GridCoordDescription([coords[start - 1] gridCoordValue]));
@@ -1413,7 +1419,7 @@ const NSInteger kLongMaximumWordLength = 100000;
             return VT100GridAbsCoordRangeMake(-1, -1, -1, -1);
         }
     }
-    
+
     if (trailing != iTermTextExtractorTrimTrailingWhitespaceNone) {
         __block BOOL haveSeenCharacter = NO;
         __block BOOL haveSeenNewline = NO;
@@ -1555,10 +1561,10 @@ const NSInteger kLongMaximumWordLength = 100000;
         switch (c) {
             case TAB_FILLER:
                 break;
-                
+
             case '\t':
                 return NO;
-                
+
             default:
                 return YES;
         }

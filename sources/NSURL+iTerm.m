@@ -28,7 +28,7 @@ NS_ASSUME_NONNULL_BEGIN
     if (!queryParameter.length) {
         return self;
     }
-    
+
     NSURL *urlWithoutFragment = [self URLByRemovingFragment];
     NSString *fragment;
     if (self.fragment) {
@@ -36,7 +36,7 @@ NS_ASSUME_NONNULL_BEGIN
     } else {
         fragment = @"";
     }
-    
+
     NSString *separator;
     if (self.query) {
         if (self.query.length > 0) {
@@ -47,10 +47,10 @@ NS_ASSUME_NONNULL_BEGIN
     } else {
         separator = @"?";
     }
-    
+
     NSArray *components = @[ urlWithoutFragment.absoluteString, separator, queryParameter, fragment ];
     NSString *string = [components componentsJoinedByString:@""];
-    
+
     return [NSURL URLWithString:string];
 }
 
@@ -70,6 +70,76 @@ NS_ASSUME_NONNULL_BEGIN
     } else {
         return [NSURL URLWithString:string];
     }
+}
+
+- (NSData *)zippedContents {
+    if (!self.fileURL) {
+        return nil;
+    }
+
+    NSString *uuid = [[NSUUID UUID] UUIDString];
+    NSURL *destination =
+        [[NSURL fileURLWithPath:NSTemporaryDirectory()] URLByAppendingPathComponent:uuid];
+
+    BOOL ok = [self saveContentsOfPathToZip:destination];
+    if (ok) {
+        NSData *data = [NSData dataWithContentsOfURL:destination];
+        [[NSFileManager defaultManager] removeItemAtURL:destination error:NULL];
+        return data;
+    } else {
+        return nil;
+    }
+}
+
+- (BOOL)saveContentsOfPathToZip:(NSURL *)destination {
+    NSFileManager *fileManager = [NSFileManager defaultManager];
+
+    BOOL isDir = NO;
+    if (![fileManager fileExistsAtPath:self.path isDirectory:&isDir]) {
+        return NO;
+    }
+
+    NSURL *sourceDir = nil;
+    BOOL sourceDirIsTemporary= NO;
+    if (isDir) {
+        sourceDir = self;
+        sourceDirIsTemporary = NO;
+    } else {
+        NSString *uuid = [[NSUUID UUID] UUIDString];
+        sourceDir = [[NSURL fileURLWithPath:NSTemporaryDirectory()] URLByAppendingPathComponent:uuid];
+
+        NSError *error;
+        [fileManager createDirectoryAtURL:sourceDir
+              withIntermediateDirectories:YES
+                               attributes:nil
+                                    error:&error];
+        if (error) {
+            return NO;
+        }
+        NSURL *tempURL = [sourceDir URLByAppendingPathComponent:self.lastPathComponent ?: @"file"];
+
+        [fileManager copyItemAtURL:self toURL:tempURL error:&error];
+        if (error) {
+            return NO;
+        }
+
+        sourceDirIsTemporary = YES;
+    }
+
+    NSFileCoordinator *coordinator = [[NSFileCoordinator alloc] init];
+    __block NSError *error = nil;
+    [coordinator coordinateReadingItemAtURL:sourceDir
+                                    options:NSFileCoordinatorReadingForUploading
+                                      error:&error
+                                 byAccessor:^(NSURL * _Nonnull zippedURL) {
+                                     [fileManager copyItemAtURL:zippedURL
+                                                          toURL:destination
+                                                          error:&error];
+                                 }];
+    if (sourceDirIsTemporary) {
+        [fileManager removeItemAtURL:sourceDir error:NULL];
+    }
+    return YES;
 }
 
 @end

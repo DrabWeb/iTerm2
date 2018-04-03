@@ -7,6 +7,7 @@
 //
 
 #import <Cocoa/Cocoa.h>
+#include <simd/vector_types.h>
 
 // This would be an enum except lldb doesn't handle enums very well.
 // (lldb) po [_colorMap colorForKey:kColorMapBackground]
@@ -67,7 +68,7 @@ extern const int kColorMap24bitBase;
 // self.dimmingAmount towards a neutral gray, and is used to indicate a session's inactivity. Muting
 // moves colors towards the background color and is used by the "cursor boost" feature to make the
 // cursor stand out more.
-@interface iTermColorMap : NSObject
+@interface iTermColorMap : NSObject<NSCopying>
 
 @property(nonatomic, assign) BOOL dimOnlyText;
 @property(nonatomic, assign) double dimmingAmount;
@@ -81,6 +82,7 @@ extern const int kColorMap24bitBase;
 
 - (void)setColor:(NSColor *)theColor forKey:(iTermColorMapKey)theKey;
 - (NSColor *)colorForKey:(iTermColorMapKey)theKey;
+- (vector_float4)fastColorForKey:(iTermColorMapKey)theKey;
 
 // Apply the following filters in order:
 // 1. Modify textColor to have at least self.minimumContrast against backgroundColor
@@ -91,7 +93,9 @@ extern const int kColorMap24bitBase;
 - (NSColor *)processedTextColorForTextColor:(NSColor *)textColor
                         overBackgroundColor:(NSColor*)backgroundColor;
 - (NSColor *)processedBackgroundColorForBackgroundColor:(NSColor *)color;
+- (vector_float4)fastProcessedBackgroundColorForBackgroundColor:(vector_float4)backgroundColor;
 - (NSColor *)colorByMutingColor:(NSColor *)color;
+- (vector_float4)fastColorByMutingColor:(vector_float4)color;
 - (NSColor *)colorByDimmingTextColor:(NSColor *)color;
 
 // Returns non-nil profile key name for valid logical colors, ANSI colors, and bright ANSI colors.

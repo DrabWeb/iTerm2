@@ -5,7 +5,8 @@
 #import "iTermAdvancedSettingsModel.h"
 #import "iTermApplicationDelegate.h"
 #import "iTermController.h"
-#import "iTermGrowlDelegate.h"
+#import "iTermNotificationController.h"
+#import "iTermPowerManager.h"
 #import "iTermPreferences.h"
 #import "iTermPromptOnCloseReason.h"
 #import "iTermProfilePreferences.h"
@@ -183,9 +184,11 @@ static void SetAgainstGrainDim(BOOL isVertical, NSSize *dest, CGFloat value) {
 
     // This tab broadcasts to all its sessions?
     BOOL broadcasting_;
-    
+
     // Currently dragging a split pane in a tab that's also a tmux tab?
     BOOL _isDraggingSplitInTmuxTab;
+
+    BOOL _resizingSplit;
 }
 
 @synthesize parentWindow = parentWindow_;
@@ -349,6 +352,10 @@ static void SetAgainstGrainDim(BOOL isVertical, NSSize *dest, CGFloat value) {
     [[NSNotificationCenter defaultCenter] addObserver:self
                                              selector:@selector(_refreshLabels:)
                                                  name:kUpdateLabelsNotification
+                                               object:nil];
+    [[NSNotificationCenter defaultCenter] addObserver:self
+                                             selector:@selector(updateUseMetal)
+                                                 name:iTermPowerManagerStateDidChange
                                                object:nil];
 }
 
@@ -529,6 +536,7 @@ static void SetAgainstGrainDim(BOOL isVertical, NSSize *dest, CGFloat value) {
 - (void)nameOfSession:(PTYSession*)session didChangeTo:(NSString*)newName {
     if ([self activeSession] == session) {
         [tabViewItem_ setLabel:newName];
+        [self.realParentWindow tabTitleDidChange:self];
     }
 }
 
@@ -555,6 +563,7 @@ static void SetAgainstGrainDim(BOOL isVertical, NSSize *dest, CGFloat value) {
     restorableSession.tabUniqueId = self.uniqueId;
     restorableSession.arrangement = self.arrangement;
     restorableSession.group = kiTermRestorableSessionGroupSession;
+    [realParentWindow_ storeWindowStateInRestorableSession:restorableSession];
 }
 
 - (void)setActiveSession:(PTYSession *)session {
@@ -610,7 +619,7 @@ static void SetAgainstGrainDim(BOOL isVertical, NSSize *dest, CGFloat value) {
     if (changed) {
         [[self realParentWindow] tabActiveSessionDidChange];
     }
-    
+
     [[self realParentWindow] updateTabColors];
     [self recheckBlur];
 
@@ -1007,9 +1016,30 @@ static void SetAgainstGrainDim(BOOL isVertical, NSSize *dest, CGFloat value) {
                       verticalDir:(BOOL)verticalDir
                             after:(BOOL)after {
     NSArray<PTYSession *> *sessions = [self sessionsAdjacentToSession:session verticalDir:verticalDir after:after];
-    return [sessions maxWithComparator:^NSComparisonResult(PTYSession *a, PTYSession *b) {
-        return [a.activityCounter compare:b.activityCounter];
-    }];
+    if (sessions.count || ![iTermAdvancedSettingsModel wrapFocus]) {
+        return [sessions maxWithComparator:^NSComparisonResult(PTYSession *a, PTYSession *b) {
+            return [a.activityCounter compare:b.activityCounter];
+        }];
+    } else {
+        sessions = [self sessionsInProjectionOfSession:session verticalDirection:verticalDir after:!after];
+        NSArray<PTYSession *> *wraparounds = [sessions mininumsWithComparator:^NSComparisonResult(PTYSession *a, PTYSession *b) {
+            NSRect aRect = [root_ convertRect:a.view.frame fromView:a.view.superview];
+            NSRect bRect = [root_ convertRect:b.view.frame fromView:b.view.superview];
+            if (verticalDir) {
+                SwapSize(&aRect.size);
+                SwapPoint(&aRect.origin);
+                SwapSize(&bRect.size);
+                SwapPoint(&bRect.origin);
+            }
+
+            const CGFloat bLeft = after ? NSMinX(bRect) : -NSMaxX(bRect);
+            const CGFloat aLeft = after ? NSMinX(aRect) : -NSMaxX(aRect);
+            return [@(aLeft) compare:@(bLeft)];
+        }];
+        return [wraparounds maxWithComparator:^NSComparisonResult(PTYSession *a, PTYSession *b) {
+            return [a.activityCounter compare:b.activityCounter];
+        }];
+    }
 }
 
 - (PTYSession*)sessionLeftOf:(PTYSession*)session {
@@ -1429,6 +1459,9 @@ static void SetAgainstGrainDim(BOOL isVertical, NSSize *dest, CGFloat value) {
     } else {
         [self fitSessionToCurrentViewSize:session];
     }
+    if (@available(macOS 10.11, *)) {
+        [self updateUseMetal];
+    }
 }
 
 - (void)removeSession:(PTYSession*)aSession {
@@ -1750,7 +1783,7 @@ static void SetAgainstGrainDim(BOOL isVertical, NSSize *dest, CGFloat value) {
             haveFoundLock = YES;
         }
     }
-    
+
     DLog(@"Size is %@", NSStringFromSize(size));
     return size;
 }
@@ -2026,7 +2059,7 @@ static void SetAgainstGrainDim(BOOL isVertical, NSSize *dest, CGFloat value) {
             [sv setFrame:frame];
         }
     }
-    return (isVertical ? 
+    return (isVertical ?
             NSMakeSize(offset - dividerThickness, maxAgainstGrain) :
             NSMakeSize(maxAgainstGrain, offset - dividerThickness));
 }
@@ -2152,7 +2185,14 @@ static void SetAgainstGrainDim(BOOL isVertical, NSSize *dest, CGFloat value) {
         }
     }
     if (count > 0) {
-        return sum / count;
+        if (@available(macOS 10.13, *)) {
+            // Issue 6115. It turns red for values over 26. When I drop 10.12 support I can adjust
+            // the slider to not go above 26. But it's super slow before you get
+          // to 26, so let's limit it to 24. Issue 6138.
+            return MIN(24, sum / count);
+        } else {
+            return sum / count;
+        }
     } else {
         // This shouldn't actually happen, but better safe than divide by zero.
         return 2.0;
@@ -2717,7 +2757,7 @@ static void SetAgainstGrainDim(BOOL isVertical, NSSize *dest, CGFloat value) {
     NSSize size;
 
     DLog(@"recursiveSetSizesInTmuxParseTree for node:\n%@", parseTree);
-    
+
     BOOL isVertical = NO;
     switch ([[parseTree objectForKey:kLayoutDictNodeType] intValue]) {
         case kLeafLayoutNode:
@@ -2943,7 +2983,7 @@ static void SetAgainstGrainDim(BOOL isVertical, NSSize *dest, CGFloat value) {
         }
     }
 
-    
+
     theTab->tmuxWindow_ = tmuxWindow;
     theTab->parseTree_ = [parseTree retain];
 
@@ -3041,7 +3081,7 @@ static void SetAgainstGrainDim(BOOL isVertical, NSSize *dest, CGFloat value) {
                                                             borderType:session.view.scrollview.borderType
                                                            controlSize:NSRegularControlSize
                                                          scrollerStyle:session.view.scrollview.scrollerStyle];
-            
+
             int chars = forHeight ? (contentSize.height - [iTermAdvancedSettingsModel terminalVMargin] * 2) / cellSize.height :
                                     (contentSize.width - [iTermAdvancedSettingsModel terminalMargin] * 2) / cellSize.width;
             [intervalMap incrementNumbersBy:chars
@@ -3091,7 +3131,7 @@ static void SetAgainstGrainDim(BOOL isVertical, NSSize *dest, CGFloat value) {
 // dividers as 1).
 - (NSSize)tmuxSize {
     DLog(@"Compute size in characters of the window that fits this tab's contents");
-    
+
     // The current size of the sessions in this tab in characters
     // ** BUG **
     // This rounds off fractional parts. We really need to know the maximum capacity, and fractional parts can add up to more than one whole char.
@@ -3549,7 +3589,7 @@ static void SetAgainstGrainDim(BOOL isVertical, NSSize *dest, CGFloat value) {
 
     [[root_ window] makeFirstResponder:[activeSession_ textview]];
     [realParentWindow_ invalidateRestorableState];
-    
+
     for (SessionView *sessionView in self.sessionViews) {
         // I don't know why, but this doesn't get called automatically and so focus follows mouse
         // breaks. Issue 4810.
@@ -3724,19 +3764,19 @@ static void SetAgainstGrainDim(BOOL isVertical, NSSize *dest, CGFloat value) {
         [session2 isTmuxGateway]) {
         return;
     }
-    
+
     DLog(@"Before swap, %@ has superview %@ and %@ has superview %@",
          session1.view, session1.view.superview,
          session2.view, session2.view.superview);
 
     PTYTab *session1Tab = (PTYTab *)session1.delegate;
     PTYTab *session2Tab = (PTYTab *)session2.delegate;
-    
+
     PTYSplitView *session1Superview = (PTYSplitView *)session1.view.superview;
     NSUInteger session1Index = [[session1Superview subviews] indexOfObject:session1.view];
     PTYSplitView *session2Superview = (PTYSplitView *)session2.view.superview;
     NSUInteger session2Index = [[session2Superview subviews] indexOfObject:session2.view];
-    
+
     session1Superview.delegate = nil;
     session2Superview.delegate = nil;
     if (session1Superview == session2Superview) {
@@ -3752,7 +3792,7 @@ static void SetAgainstGrainDim(BOOL isVertical, NSSize *dest, CGFloat value) {
     }
     session1Superview.delegate = session1Tab;
     session2Superview.delegate = session2Tab;
-    
+
     session1.delegate = session2Tab;
     session2.delegate = session1Tab;
 
@@ -3770,10 +3810,10 @@ static void SetAgainstGrainDim(BOOL isVertical, NSSize *dest, CGFloat value) {
               [aTab fitSessionToCurrentViewSize:aSession];
           }
     }
-    
+
     [session1Tab fitSessionToCurrentViewSize:session1];
     [session2Tab fitSessionToCurrentViewSize:session1];
-    
+
     DLog(@"After swap, %@ has superview %@ and %@ has superview %@",
          session1.view, session1.view.superview,
          session2.view, session2.view.superview);
@@ -3784,7 +3824,7 @@ static void SetAgainstGrainDim(BOOL isVertical, NSSize *dest, CGFloat value) {
     [session1Tab.viewToSessionMap removeObjectForKey:session1.view];
     [session2Tab.viewToSessionMap removeObjectForKey:session2.view];
 
-    
+
     [session1Tab.viewToSessionMap setObject:session2 forKey:session2.view];
     [session2Tab.viewToSessionMap setObject:session1 forKey:session1.view];
 }
@@ -4439,6 +4479,13 @@ static void SetAgainstGrainDim(BOOL isVertical, NSSize *dest, CGFloat value) {
     }
 }
 
+- (void)splitViewWillResizeSubviews:(NSNotification *)notification {
+    _resizingSplit = YES;
+    if (@available(macOS 10.11, *)) {
+        [self updateUseMetal];
+    }
+}
+
 // Inform sessions about their new sizes. This is called after views have finished
 // being resized.
 - (void)splitViewDidResizeSubviews:(NSNotification *)aNotification {
@@ -4454,6 +4501,10 @@ static void SetAgainstGrainDim(BOOL isVertical, NSSize *dest, CGFloat value) {
     PtyLog(@"splitViewDidResizeSubviews notification received. new height is %lf", [root_ frame].size.height);
     NSSplitView* splitView = [aNotification object];
     [self _splitViewDidResizeSubviews:splitView];
+    _resizingSplit = NO;
+    if (@available(macOS 10.11, *)) {
+        [self updateUseMetal];
+    }
 }
 
 // This is the implementation of splitViewDidResizeSubviews. The delegate method isn't called when
@@ -4569,7 +4620,7 @@ static void SetAgainstGrainDim(BOOL isVertical, NSSize *dest, CGFloat value) {
             if (session.isIdle &&
                 [[NSDate date] timeIntervalSinceDate:[SessionView lastResizeDate]] > POST_WINDOW_RESIZE_SILENCE_SEC) {
                 // Idle after new output
-                
+
                 // See if a notification should be posted.
                 if (!session.havePostedIdleNotification && [session shouldPostGrowlNotification]) {
                     NSString *theDescription =
@@ -4577,7 +4628,7 @@ static void SetAgainstGrainDim(BOOL isVertical, NSSize *dest, CGFloat value) {
                             [session name],
                             [self tabNumber]];
                     if ([iTermProfilePreferences boolForKey:KEY_SEND_IDLE_ALERT inProfile:session.profile]) {
-                        [[iTermGrowlDelegate sharedInstance] growlNotify:@"Idle"
+                        [[iTermNotificationController sharedInstance] notify:@"Idle"
                                                          withDescription:theDescription
                                                          andNotification:@"Idle"
                                                              windowIndex:[session screenWindowIndex]
@@ -4615,7 +4666,7 @@ static void SetAgainstGrainDim(BOOL isVertical, NSSize *dest, CGFloat value) {
         notify &&
         [[NSDate date] timeIntervalSinceDate:[SessionView lastResizeDate]] > POST_WINDOW_RESIZE_SILENCE_SEC) {
         if ([iTermProfilePreferences boolForKey:KEY_SEND_NEW_OUTPUT_ALERT inProfile:self.activeSession.profile]) {
-            [[iTermGrowlDelegate sharedInstance] growlNotify:NSLocalizedStringFromTableInBundle(@"New Output",
+            [[iTermNotificationController sharedInstance] notify:NSLocalizedStringFromTableInBundle(@"New Output",
                                                                                                 @"iTerm",
                                                                                                 [NSBundle bundleForClass:[self class]],
                                                                                                 @"Growl Alerts")
@@ -4666,6 +4717,29 @@ static void SetAgainstGrainDim(BOOL isVertical, NSSize *dest, CGFloat value) {
     }
 }
 
+// Note this is a notification handler
+- (void)updateUseMetal NS_AVAILABLE_MAC(10_11) {
+    const BOOL resizing = self.realParentWindow.windowIsResizing;
+    const BOOL connectedToPower = [[iTermPowerManager sharedInstance] connectedToPower];
+    const BOOL connectionToPowerRequired = [iTermAdvancedSettingsModel disableMetalWhenUnplugged];
+    const BOOL powerOK = (!connectionToPowerRequired || connectedToPower);
+    const BOOL allSessionsAllowMetal = [self.sessions allWithBlock:^BOOL(PTYSession *anObject) {
+        return anObject.metalAllowed;
+    }];
+    const BOOL allowed = (!resizing &&
+                          powerOK &&
+                          allSessionsAllowMetal);
+    const BOOL ONLY_KEY_WINDOWS_USE_METAL = NO;
+    const BOOL isKey = [[[self realParentWindow] window] isKeyWindow];
+    const BOOL satisfiesKeyRequirement = (isKey || !ONLY_KEY_WINDOWS_USE_METAL);
+    const BOOL foregroundTab = [self isForegroundTab];
+    const BOOL useMetal = allowed && satisfiesKeyRequirement && foregroundTab;
+    [self.sessions enumerateObjectsUsingBlock:^(PTYSession * _Nonnull obj, NSUInteger idx, BOOL * _Nonnull stop) {
+        obj.useMetal = useMetal;
+    }];
+    [_delegate tab:self didSetMetalEnabled:useMetal];
+}
+
 #pragma mark - PTYSessionDelegate
 // TODO: Move the rest of the delegate methods here.
 
@@ -4685,9 +4759,10 @@ static void SetAgainstGrainDim(BOOL isVertical, NSSize *dest, CGFloat value) {
 }
 
 - (BOOL)session:(PTYSession *)session performDragOperation:(id<NSDraggingInfo>)sender {
+    // self is the destination tab. session is the session that's moving.
     if ([[[sender draggingPasteboard] types] indexOfObject:iTermMovePaneDragType] != NSNotFound) {
         if ([[MovePaneController sharedInstance] isMovingSession:session]) {
-            if (self.sessions.count > 1 && !self.realParentWindow.anyFullScreen) {
+            if (self.sessions.count == 1 && !self.realParentWindow.anyFullScreen && self.realParentWindow.movesWhenDraggedOntoSelf) {
                 // If you dragged a session from a tab with split panes onto itself then do nothing.
                 // But if you drag a session onto itself in a tab WITHOUT split panes, then move the
                 // whole window.
@@ -4781,6 +4856,16 @@ static void SetAgainstGrainDim(BOOL isVertical, NSSize *dest, CGFloat value) {
         return VT100GridSizeMake((contentSize.width - [iTermAdvancedSettingsModel terminalMargin] * 2) / cellSize.width,
                                  (contentSize.height - [iTermAdvancedSettingsModel terminalVMargin] * 2) / cellSize.height);
     }
+}
+
+- (void)sessionUpdateMetalAllowed {
+    if (@available(macOS 10.11, *)) {
+        [self updateUseMetal];
+    }
+}
+
+- (void)sessionDidClearScrollbackBuffer:(PTYSession *)session {
+    [realParentWindow_ tabDidClearScrollbackBufferInSession:session];
 }
 
 @end

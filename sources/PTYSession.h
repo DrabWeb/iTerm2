@@ -46,7 +46,7 @@ extern NSString *const PTYSessionRevivedNotification;
 @class iTermColorMap;
 @class iTermCommandHistoryCommandUseMO;
 @class iTermController;
-@class iTermGrowlDelegate;
+@class iTermNotificationController;
 @class iTermPromptOnCloseReason;
 @class iTermQuickLookController;
 @class SessionView;
@@ -193,6 +193,12 @@ typedef enum {
 
 // Returns the size of the tab in rows x cols. Initial tmux client size.
 - (VT100GridSize)sessionTmuxSizeWithProfile:(Profile *)profile;
+
+// Whether metal is allowed has changed
+- (void)sessionUpdateMetalAllowed;
+
+// Scrollback buffer cleared.
+- (void)sessionDidClearScrollbackBuffer:(PTYSession *)session;
 
 @end
 
@@ -345,6 +351,12 @@ typedef enum {
 @property(nonatomic, readonly) int columns;
 @property(nonatomic, readonly) int rows;
 
+// Returns whether this session considers itself eligible to use the Metal renderer.
+@property(nonatomic, readonly) BOOL metalAllowed;
+
+// Controls whether this session uses the Metal renderer.
+@property(nonatomic) BOOL useMetal;
+
 // Has this session's bookmark been divorced from the profile in the ProfileModel? Changes
 // in this bookmark may happen indepentendly of the persistent bookmark.
 // You should usually not assign to this; instead use divorceAddressBookEntryFromPreferences.
@@ -447,6 +459,8 @@ typedef enum {
 @property(nonatomic, readonly) BOOL passwordInput;
 
 @property(nonatomic) BOOL isSingleUseSession;
+@property(nonatomic) BOOL overrideGlobalDisableMetalWhenIdleSetting;
+@property(nonatomic, readonly) BOOL canProduceMetalFramecap;
 
 #pragma mark - methods
 
@@ -721,6 +735,7 @@ typedef enum {
 - (void)disinter;
 
 - (void)jumpToLocationWhereCurrentStatusChanged;
+- (void)updateMetalDriver;
 
 #pragma mark - API
 

@@ -84,7 +84,7 @@
 + (BOOL)optionIsMetaForSpecialChars;
 
 + (BOOL)startDebugLoggingAutomatically;
-+ (BOOL)aboutToPasteTabs;
++ (BOOL)aboutToPasteTabsWithCancel;
 
 + (BOOL)alwaysAcceptFirstMouse;
 
@@ -145,6 +145,7 @@
 + (BOOL)includePasteHistoryInAdvancedPaste;
 + (BOOL)experimentalKeyHandling;
 + (double)hotKeyDoubleTapMaxDelay;
++ (double)hotKeyDoubleTapMinDelay;
 + (BOOL)hideStuckTooltips;
 + (BOOL)indicateBellsInDockBadgeLabel;
 + (double)tabFlashAnimationDuration;
@@ -155,7 +156,6 @@
 + (double)timeBetweenTips;
 + (void)setTimeBetweenTips:(double)time;
 + (BOOL)openFileOverridesSendText;
-+ (BOOL)useLayers;
 + (int)terminalMargin;
 + (int)terminalVMargin;
 + (BOOL)useColorfgbgFallback;
@@ -187,10 +187,27 @@
 + (BOOL)detectPasswordInput;
 + (BOOL)disablePasswordManagerAnimations;
 + (BOOL)focusNewSplitPaneWithFocusFollowsMouse;
++ (BOOL)NoSyncSuppressRestartSessionConfirmationAlert;
 + (NSString *)viewManPageCommand;
 + (BOOL)preventEscapeSequenceFromClearingHistory;
 + (BOOL)dwcLineCache;
 + (BOOL)lowFiCombiningMarks;
 + (CGFloat)verticalBarCursorWidth;
++ (BOOL)statusBarIcon;
++ (BOOL)wrapFocus;
++ (BOOL)sensitiveScrollWheel;
++ (BOOL)disableCustomBoxDrawing;
++ (BOOL)useExperimentalFontMetrics;
++ (BOOL)supportREPCode;
++ (BOOL)showBlockBoundaries;
++ (BOOL)useMetal;
++ (BOOL)showMetalFPSmeter;
++ (BOOL)tabsWrapAround;
++ (BOOL)middleClickClosesTab;
++ (BOOL)disableMetalWhenUnplugged;
++ (BOOL)disableMetalWhenIdle;
++ (BOOL)disableGrowl;
++ (BOOL)proportionalScrollWheelReporting;
++ (BOOL)useModernScrollWheelAccumulator;
 
 @end

@@ -2,13 +2,14 @@
 
 #import "Coprocess.h"
 #import "DebugLogging.h"
-#import "iTermGrowlDelegate.h"
+#import "iTermNotificationController.h"
 #import "NSWorkspace+iTerm.h"
 #import "PreferencePanel.h"
 #import "ProcessCache.h"
 #import "PTYTask.h"
 #import "TaskNotifier.h"
 #import "iTermAdvancedSettingsModel.h"
+#import "iTermLSOF.h"
 #import "iTermOrphanServerAdopter.h"
 #import <OpenDirectory/OpenDirectory.h>
 
@@ -108,7 +109,7 @@ setup_tty_param(struct termios* term,
     BOOL _paused;
 
     int _socketFd;  // File descriptor for unix domain socket connected to server. Only safe to close after server is dead.
-    
+
     VT100GridSize _desiredSize;
     NSTimeInterval _timeOfLastSizeChange;
     BOOL _rateLimitedSetSizeToDesiredSizePending;
@@ -188,8 +189,7 @@ static void HandleSigChld(int n) {
     UnblockTaskNotifier();
 }
 
-- (NSString *)command
-{
+- (NSString *)originalCommand {
     return command_;
 }
 
@@ -444,6 +444,9 @@ static int MyForkPty(int *amaster,
     struct winsize win;
     char theTtyname[PATH_MAX];
 
+    [command_ autorelease];
+    command_ = [progpath copy];
+
     env = [self environmentBySettingShell:env];
     if ([iTermAdvancedSettingsModel runJobsInServers]) {
         // We want to run
@@ -460,8 +463,6 @@ static int MyForkPty(int *amaster,
         progpath = iterm2Binary;
     }
 
-    [command_ autorelease];
-    command_ = [progpath copy];
     path = [progpath copy];
 
     setup_tty_param(&term, &win, width, height, isUTF8);
@@ -496,7 +497,7 @@ static int MyForkPty(int *amaster,
     DLog(@"Environment is\n%@", env);
     char **newEnviron = [self environWithOverrides:env];
     int deadMansPipe[2] = { 0, 0 };
-    
+
     // Note: stringByStandardizingPath will automatically call stringByExpandingTildeInPath.
     const char *initialPwd = [[[env objectForKey:@"PWD"] stringByStandardizingPath] UTF8String];
     pid_t pid;
@@ -559,7 +560,7 @@ static int MyForkPty(int *amaster,
         // Now fork. This variant of forkpty passes through the master, slave,
         // and serverConnectionFd to the child job.
         pipe(deadMansPipe);
-        
+
         // This closes serverConnectionFd and deadMansPipe[1] in the parent process but not the child.
         iTermFileDescriptorServerLog("Calling MyForkPty");
         pid = _serverPid = MyForkPty(&fd, theTtyname, &term, &win, serverConnectionFd, deadMansPipe[1]);
@@ -605,8 +606,8 @@ static int MyForkPty(int *amaster,
     } else if (pid < (pid_t)0) {
         // Error
         DLog(@"Unable to fork %@: %s", progpath, strerror(errno));
-        [[iTermGrowlDelegate sharedInstance] growlNotify:@"Unable to fork!" withDescription:@"You may have too many processes already running."];
-        
+        [[iTermNotificationController sharedInstance] notify:@"Unable to fork!" withDescription:@"You may have too many processes already running."];
+
         for (int j = 0; newEnviron[j]; j++) {
             free(newEnviron[j]);
         }
@@ -636,7 +637,7 @@ static int MyForkPty(int *amaster,
             // copy in serverConnection.
             close(fd);
             fd = -1;
-            
+
             // The serverConnection has the wrong server PID because the connection was made prior
             // to fork(). Update serverConnection with the real server PID.
             serverConnection.serverPid = pid;
@@ -827,8 +828,11 @@ static int MyForkPty(int *amaster,
     [self.delegate threadedTaskBrokenPipe];
 }
 
-- (void)sendSignal:(int)signo {
-    if (_serverChildPid != -1) {
+- (void)sendSignal:(int)signo toServer:(BOOL)toServer {
+    if (toServer && _serverPid != -1) {
+        DLog(@"Sending signal to server %@", @(_serverPid));
+        kill(_serverPid, signo);
+    } else if (_serverChildPid != -1) {
         kill(_serverChildPid, signo);
      } else if (_childPid >= 0) {
          kill(_childPid, signo);
@@ -889,7 +893,7 @@ static int MyForkPty(int *amaster,
 - (void)setTerminalSizeToDesiredSize {
     DLog(@"Set size of %@ to %@", _delegate, VT100GridSizeDescription(_desiredSize));
     _timeOfLastSizeChange = [NSDate timeIntervalSinceReferenceDate];
-    
+
     struct winsize winsize;
     ioctl(fd, TIOCGWINSZ, &winsize);
     if (winsize.ws_col != _desiredSize.width || winsize.ws_row != _desiredSize.height) {
@@ -930,7 +934,7 @@ static int MyForkPty(int *amaster,
 - (void)stop {
     self.paused = NO;
     [self stopLogging];
-    [self sendSignal:SIGHUP];
+    [self sendSignal:SIGHUP toServer:NO];
     [self killServerIfRunning];
 
     if (fd >= 0) {
@@ -1056,11 +1060,11 @@ static int MyForkPty(int *amaster,
     pid_t oldestPid = -1;
     for (int i = 0; i < numPids; ++i) {
         struct proc_taskallinfo taskAllInfo;
-        int rc = proc_pidinfo(pids[i],
-                              PROC_PIDTASKALLINFO,
-                              0,
-                              &taskAllInfo,
-                              sizeof(taskAllInfo));
+        int rc = iTermProcPidInfoWrapper(pids[i],
+                                         PROC_PIDTASKALLINFO,
+                                         0,
+                                         &taskAllInfo,
+                                         sizeof(taskAllInfo));
         if (rc <= 0) {
             continue;
         }
@@ -1100,13 +1104,13 @@ static int MyForkPty(int *amaster,
     // This only works if the child process is owned by our uid
     // Notably it seems to work (at least on 10.10) even if the process ID is
     // not owned by us.
-    ret = proc_pidinfo(self.pid, PROC_PIDVNODEPATHINFO, 0, &vpi, sizeof(vpi));
+    ret = iTermProcPidInfoWrapper(self.pid, PROC_PIDVNODEPATHINFO, 0, &vpi, sizeof(vpi));
     if (ret <= 0) {
         // The child was probably owned by root (which is expected if it's
         // a login shell. Use the cwd of its oldest child instead.
         pid_t childPid = [self getFirstChildOfPid:self.pid];
         if (childPid > 0) {
-            ret = proc_pidinfo(childPid, PROC_PIDVNODEPATHINFO, 0, &vpi, sizeof(vpi));
+            ret = iTermProcPidInfoWrapper(childPid, PROC_PIDVNODEPATHINFO, 0, &vpi, sizeof(vpi));
         }
     }
     if (ret <= 0) {

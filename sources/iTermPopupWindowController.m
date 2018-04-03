@@ -18,24 +18,24 @@
 @implementation iTermPopupWindowController {
     // Subclass-owned tableview.
     NSTableView* tableView_;
-    
+
     // Results currently being displayed.
     PopupModel* model_;
-    
+
     // All candidate results, including those not matching filter. Subclass-owend.
     PopupModel* unfilteredModel_;
-    
+
     // Timer to set clearFilterOnNextKeyDown_.
     NSTimer* timer_;
-    
+
     // If set, then next time a key is pressed erase substring_ before appending.
     BOOL clearFilterOnNextKeyDown_;
     // What the user has typed so far to filter result set.
     NSMutableString* substring_;
-    
+
     // If true then window is above cursor.
     BOOL onTop_;
-    
+
     // Set to true when the user changes the selected row.
     BOOL haveChangedSelection_;
     // String that the user has selected.
@@ -95,10 +95,14 @@
     return YES;
 }
 
+- (PopupWindow *)popupWindow {
+    return (PopupWindow *)self.window;
+}
+
 - (void)popWithDelegate:(id<PopupDelegate>)delegate {
     self.delegate = delegate;
 
-    [[self window] setParentWindow:delegate.popupWindowController.window];
+    [self.popupWindow setOwningWindow:delegate.popupWindowController.window];
 
     static const NSTimeInterval kAnimationDuration = 0.15;
     self.window.alphaValue = 0;
@@ -117,6 +121,51 @@
     [[NSAnimationContext currentContext] setDuration:kAnimationDuration];
     self.window.animator.alphaValue = 1;
     [NSAnimationContext endGrouping];
+}
+
+#pragma mark - NSResponder Hacks
+
+// When a popup window is open we will forward some actions to the "real" responder in the owning
+// window. We have to implement the methods in question so that the SDK will enable them in the
+// menu.
+- (BOOL)validateMenuItem:(NSMenuItem *)menuItem {
+    for (NSResponder *responder in self.allResponders) {
+        if ([responder respondsToSelector:@selector(validateMenuItem:)] &&
+            [responder validateMenuItem:menuItem]) {
+            return YES;
+        }
+    }
+    return NO;
+}
+
+- (NSArray *)allResponders {
+    NSMutableArray *responders = [NSMutableArray array];
+    NSResponder *responder = [self.popupWindow.owningWindow firstResponder];
+    while (responder) {
+        [responders addObject:responder];
+        responder = [responder nextResponder];
+    }
+    return responders;
+}
+
+- (void)paste:(id)sender {
+    [self.popupWindow.owningWindow.firstResponder tryToPerform:_cmd with:sender];
+}
+
+- (void)copy:(id)sender {
+    [self.popupWindow.owningWindow.firstResponder tryToPerform:_cmd with:sender];
+}
+
+- (void)copyWithStyles:(id)sender {
+    [self.popupWindow.owningWindow.firstResponder tryToPerform:_cmd with:sender];
+}
+
+- (void)selectAll:(id)sender {
+    [self.popupWindow.owningWindow.firstResponder tryToPerform:_cmd with:sender];
+}
+
+- (void)selectOutputOfLastCommand:(id)sender {
+    [self.popupWindow.owningWindow.firstResponder tryToPerform:_cmd with:sender];
 }
 
 - (PopupModel*)unfilteredModel

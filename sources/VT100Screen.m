@@ -1,4 +1,4 @@
-﻿
+
 #import "VT100Screen.h"
 
 #import "CapturedOutput.h"
@@ -9,7 +9,7 @@
 #import "iTermCapturedOutputMark.h"
 #import "iTermColorMap.h"
 #import "iTermExpose.h"
-#import "iTermGrowlDelegate.h"
+#import "iTermNotificationController.h"
 #import "iTermImage.h"
 #import "iTermImageInfo.h"
 #import "iTermImageMark.h"
@@ -17,6 +17,7 @@
 #import "iTermPreferences.h"
 #import "iTermSelection.h"
 #import "iTermShellHistoryController.h"
+#import "iTermTextExtractor.h"
 #import "iTermTemporaryDoubleBufferedGridController.h"
 #import "NSArray+iTerm.h"
 #import "NSColor+iTerm.h"
@@ -144,7 +145,7 @@ static const double kInterBellQuietPeriod = 0.1;
     BOOL _wraparoundMode;
     BOOL _ansi;
     BOOL _insert;
-    
+
     BOOL _shellIntegrationInstalled;
 
     NSDictionary *inlineFileInfo_;  // Keys are kInlineFileXXX
@@ -159,6 +160,10 @@ static const double kInterBellQuietPeriod = 0.1;
     // Valid while at the command prompt only. GIves the range of the current prompt. Meaningful
     // only if the end is not equal to the start.
     VT100GridAbsCoordRange _currentPromptRange;
+
+    // For REP
+    screen_char_t _lastCharacter;
+    BOOL _lastCharacterIsDoubleWidth;
 }
 
 static NSString *const kInlineFileName = @"name";  // NSString
@@ -200,7 +205,7 @@ static NSString *const kInilineFileInset = @"inset";  // NSValue of NSEdgeInsets
         [self setInitialTabStops];
         linebuffer_ = [[LineBuffer alloc] init];
 
-        [iTermGrowlDelegate sharedInstance];
+        [iTermNotificationController sharedInstance];
 
         dvr_ = [DVR alloc];
         [dvr_ initWithBufferCapacity:[iTermPreferences intForKey:kPreferenceKeyInstantReplayMemoryMegabytes] * 1024 * 1024];
@@ -640,7 +645,7 @@ static NSString *const kInilineFileInset = @"inset";  // NSValue of NSEdgeInsets
                               withDefaultChar:[currentGrid_ defaultChar]
                             maxLinesToRestore:[linebuffer_ numLinesWithWidth:currentGrid_.size.width]];
     DLog(@"After restoring screen from line buffer:\n%@", [self compactLineDumpWithHistoryAndContinuationMarksAndLineNumbers]);
-    
+
     // If we're in the alternate screen, restore its contents from the temporary
     // linebuffer.
     if (wasShowingAltScreen) {
@@ -938,6 +943,8 @@ static NSString *const kInilineFileInset = @"inset";  // NSValue of NSEdgeInsets
     [intervalTree_ release];
     intervalTree_ = [[IntervalTree alloc] init];
     [self reloadMarkCache];
+    self.lastCommandMark = nil;
+    [delegate_ screenDidClearScrollbackBuffer:self];
 }
 
 - (void)appendScreenChars:(screen_char_t *)line
@@ -1090,6 +1097,18 @@ static NSString *const kInilineFileInset = @"inset";  // NSValue of NSEdgeInsets
                                length:(int)len
                            shouldFree:(BOOL)shouldFree {
     if (len >= 1) {
+        screen_char_t lastCharacter = buffer[len - 1];
+        if (lastCharacter.code == DWC_RIGHT && !lastCharacter.complexChar) {
+            // Last character is the right half of a double-width character. Use the penultimate character instead.
+            if (len >= 2) {
+                _lastCharacter = buffer[len - 2];
+                _lastCharacterIsDoubleWidth = YES;
+            }
+        } else {
+            // Record the last character.
+            _lastCharacter = buffer[len - 1];
+            _lastCharacterIsDoubleWidth = NO;
+        }
         LineBuffer *lineBuffer = nil;
         if (currentGrid_ != altGrid_ || saveToScrollbackInAlternateScreen_) {
             // Not in alt screen or it's ok to scroll into line buffer while in alt screen.k
@@ -1468,6 +1487,7 @@ static NSString *const kInilineFileInset = @"inset";  // NSValue of NSEdgeInsets
 // grid.
 - (screen_char_t *)getLineAtIndex:(int)theIndex withBuffer:(screen_char_t*)buffer
 {
+    ITBetaAssert(theIndex >= 0, @"Negative index to getLineAtIndex");
     int numLinesInLineBuffer = [linebuffer_ numLinesWithWidth:currentGrid_.size.width];
     if (theIndex >= numLinesInLineBuffer) {
         // Get a line from the circular screen buffer
@@ -1900,6 +1920,9 @@ static NSString *const kInilineFileInset = @"inset";  // NSValue of NSEdgeInsets
                                                                             line + 1,
                                                                             0,
                                                                             line + 1)].location;
+    if (pos < 0) {
+        return nil;
+    }
     NSEnumerator *enumerator = [intervalTree_ reverseEnumeratorAt:pos];
     NSArray *objects;
     do {
@@ -2392,7 +2415,28 @@ static NSString *const kInilineFileInset = @"inset";  // NSValue of NSEdgeInsets
     return self.width - 1;
 }
 
-- (void)terminalAppendTabAtCursor {
+- (void)convertHardNewlineToSoftOnGridLine:(int)line {
+    screen_char_t* aLine = [currentGrid_ screenCharsAtLineNumber:line];
+    if (aLine[currentGrid_.size.width].code == EOL_HARD) {
+        aLine[currentGrid_.size.width].code = EOL_SOFT;
+    }
+}
+
+- (void)softWrapCursorToNextLineScrollingIfNeeded {
+    if (currentGrid_.cursorY == currentGrid_.bottomMargin) {
+        if (currentGrid_.rightMargin + 1 == currentGrid_.size.width) {
+            [self convertHardNewlineToSoftOnGridLine:currentGrid_.cursorY];
+        }
+        [self incrementOverflowBy:[currentGrid_ scrollUpIntoLineBuffer:linebuffer_
+                                                   unlimitedScrollback:unlimitedScrollback_
+                                               useScrollbackWithRegion:_appendToScrollbackWithStatusBar
+                                                             softBreak:YES]];
+    }
+    currentGrid_.cursorX = currentGrid_.leftMargin;
+    currentGrid_.cursorY++;
+}
+
+- (void)terminalAppendTabAtCursor:(BOOL)setBackgroundColors {
     int rightMargin;
     if (currentGrid_.useScrollRegionCols) {
         rightMargin = currentGrid_.rightMargin;
@@ -2410,8 +2454,13 @@ static NSString *const kInilineFileInset = @"inset";  // NSValue of NSEdgeInsets
 
     int nextTabStop = MIN(rightMargin, [self tabStopAfterColumn:currentGrid_.cursorX]);
     if (nextTabStop <= currentGrid_.cursorX) {
-        // This would only happen if the cursor were at or past the right margin.
-        return;
+        // This happens when the cursor can't advance any farther.
+        if ([iTermAdvancedSettingsModel tabsWrapAround]) {
+            nextTabStop = [self tabStopAfterColumn:currentGrid_.leftMargin];
+            [self softWrapCursorToNextLineScrollingIfNeeded];
+        } else {
+            return;
+        }
     }
     screen_char_t* aLine = [currentGrid_ screenCharsAtLineNumber:currentGrid_.cursorY];
     BOOL allNulls = YES;
@@ -2427,12 +2476,24 @@ static NSString *const kInilineFileInset = @"inset";  // NSValue of NSEdgeInsets
         InitializeScreenChar(&filler, [terminal_ foregroundColorCode], [terminal_ backgroundColorCode]);
         filler.code = TAB_FILLER;
         for (i = currentGrid_.cursorX; i < nextTabStop - 1; i++) {
-            aLine[i] = filler;
+            if (setBackgroundColors) {
+                aLine[i] = filler;
+            } else {
+                aLine[i].image = NO;
+                aLine[i].complexChar = NO;
+                aLine[i].code = TAB_FILLER;
+            }
         }
 
-        screen_char_t tab = filler;
-        tab.code = '\t';
-        aLine[i] = tab;
+        if (setBackgroundColors) {
+            screen_char_t tab = filler;
+            tab.code = '\t';
+            aLine[i] = tab;
+        } else {
+            aLine[i].image = NO;
+            aLine[i].complexChar = NO;
+            aLine[i].code = '\t';
+        }
     }
     currentGrid_.cursorX = nextTabStop;
 }
@@ -3044,8 +3105,8 @@ static NSString *const kInilineFileInset = @"inset";  // NSValue of NSEdgeInsets
                                     [delegate_ screenName],
                                     [delegate_ screenNumber],
                                     message];
-        BOOL sent = [[iTermGrowlDelegate sharedInstance]
-                        growlNotify:@"Alert"
+        BOOL sent = [[iTermNotificationController sharedInstance]
+                                 notify:@"Alert"
                         withDescription:description
                         andNotification:@"Customized Message"
                             windowIndex:[delegate_ screenWindowIndex]
@@ -3685,8 +3746,24 @@ static NSString *const kInilineFileInset = @"inset";  // NSValue of NSEdgeInsets
     [delegate_ screenSetColor:color forKey:kColorMapCursorText];
 }
 
-- (void)terminalSetColorTableEntryAtIndex:(int)n color:(NSColor *)color {
-    [delegate_ screenSetColor:color forKey:kColorMap8bitBase + n];
+- (void)terminalSetColorTableEntryAtIndex:(VT100TerminalColorIndex)n color:(NSColor *)color {
+    switch (n) {
+        case VT100TerminalColorIndexText:
+            [delegate_ screenSetColor:color forKey:kColorMapForeground];
+            break;
+
+        case VT100TerminalColorIndexBackground:
+            [delegate_ screenSetColor:color forKey:kColorMapBackground];
+            break;
+
+        default:
+            if (n < 0 || n > 255) {
+                return;
+            } else {
+                [delegate_ screenSetColor:color forKey:kColorMap8bitBase + n];
+            }
+            break;
+    }
 }
 
 - (void)terminalSetCurrentTabColor:(NSColor *)color {
@@ -3709,11 +3786,21 @@ static NSString *const kInilineFileInset = @"inset";  // NSValue of NSEdgeInsets
     return [iTermAdvancedSettingsModel focusReportingEnabled];
 }
 
-- (NSColor *)terminalColorForIndex:(int)index {
-    if (index < 0 || index > 255) {
-        return nil;
+- (NSColor *)terminalColorForIndex:(VT100TerminalColorIndex)index {
+    switch (index) {
+        case VT100TerminalColorIndexText:
+            return [[delegate_ screenColorMap] colorForKey:kColorMapForeground];
+
+        case VT100TerminalColorIndexBackground:
+            return [[delegate_ screenColorMap] colorForKey:kColorMapBackground];
+
+        default:
+            if (index < 0 || index > 255) {
+                return nil;
+            } else {
+                return [[delegate_ screenColorMap] colorForKey:kColorMap8bitBase + index];
+            }
     }
-    return [[delegate_ screenColorMap] colorForKey:kColorMap8bitBase + index];
 }
 
 - (int)terminalCursorX {
@@ -3919,7 +4006,7 @@ static NSString *const kInilineFileInset = @"inset";  // NSValue of NSEdgeInsets
         }
         shell = params[@"shell"];
     }
-    
+
     NSDictionary<NSString *, NSNumber *> *lastVersionByShell =
         @{ @"tcsh": @2,
            @"bash": @5,
@@ -4100,7 +4187,7 @@ static NSString *const kInilineFileInset = @"inset";  // NSValue of NSEdgeInsets
         return;
     }
     NSInteger key = [keyNumber integerValue];
-    
+
     [delegate_ screenSetColor:color forKey:key];
 }
 
@@ -4108,6 +4195,27 @@ static NSString *const kInilineFileInset = @"inset";  // NSValue of NSEdgeInsets
                                            payload:(NSString *)payload {
     [delegate_ screenDidReceiveCustomEscapeSequenceWithParameters:parameters
                                                           payload:payload];
+}
+
+- (void)terminalRepeatPreviousCharacter:(int)times {
+    if (![iTermAdvancedSettingsModel supportREPCode]) {
+        return;
+    }
+    if (_lastCharacter.code) {
+        int length = 1;
+        screen_char_t chars[2];
+        chars[0] = _lastCharacter;
+        if (_lastCharacterIsDoubleWidth) {
+            length++;
+            chars[1] = _lastCharacter;
+            chars[1].code = DWC_RIGHT;
+            chars[1].complexChar = NO;
+        }
+
+        for (int i = 0; i < times; i++) {
+            [self appendScreenCharArrayAtCursor:chars length:length shouldFree:NO];
+        }
+    }
 }
 
 #pragma mark - Private
@@ -4236,6 +4344,7 @@ static void SwapInt(int *a, int *b) {
     VT100GridRun result = run;
     int x = result.origin.x;
     int y = result.origin.y;
+    ITBetaAssert(y >= 0, @"Negative y to runByTrimmingNullsFromRun");
     screen_char_t *line = [self getLineAtIndex:y];
     int numberOfLines = [self numberOfLines];
     int width = [self width];

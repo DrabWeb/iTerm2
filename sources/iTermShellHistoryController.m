@@ -49,7 +49,7 @@ static const NSTimeInterval kMaxTimeToRememberDirectories = 60 * 60 * 24 * 90;
 
 @implementation iTermShellHistoryController {
     NSMutableDictionary<NSString *, iTermHostRecordMO *> *_records;
-    
+
     // Keys are remote host keys, "user@hostname".
     NSMutableDictionary<NSString *, NSMutableArray<iTermCommandHistoryCommandUseMO *> *> *_expandedCache;
     NSManagedObjectContext *_managedObjectContext;
@@ -177,7 +177,7 @@ static const NSTimeInterval kMaxTimeToRememberDirectories = 60 * 60 * 24 * 90;
     NSPersistentStoreCoordinator *persistentStoreCoordinator =
         [[[NSPersistentStoreCoordinator alloc] initWithManagedObjectModel:managedObjectModel] autorelease];
     assert(persistentStoreCoordinator);
-    
+
     _managedObjectContext =
         [[NSManagedObjectContext alloc] initWithConcurrencyType:NSMainQueueConcurrencyType];
     assert(_managedObjectContext);
@@ -198,7 +198,8 @@ static const NSTimeInterval kMaxTimeToRememberDirectories = 60 * 60 * 24 * 90;
         storeType = NSInMemoryStoreType;
     }
 
-    NSDictionary *options = @{};
+    NSDictionary *options = @{ NSInferMappingModelAutomaticallyOption: @YES,
+                               NSMigratePersistentStoresAutomaticallyOption: @YES };
     if (vacuum) {
         options = @{ NSSQLiteManualVacuumOption: @YES };
     }
@@ -219,7 +220,7 @@ static const NSTimeInterval kMaxTimeToRememberDirectories = 60 * 60 * 24 * 90;
             NSLog(@"Giving up");
             return NO;
         }
-        
+
         NSLog(@"Deleting the presumably corrupt file and trying again");
         NSError *removeError = nil;
         [self deleteDatabase];
@@ -227,13 +228,13 @@ static const NSTimeInterval kMaxTimeToRememberDirectories = 60 * 60 * 24 * 90;
             NSLog(@"Failed to delete corrupt database: %@", removeError);
             return NO;
         }
-        
+
         NSLog(@"Trying again...");
         [_managedObjectContext release];
         _managedObjectContext = nil;
         return [self initializeCoreDataWithRetry:NO vacuum:vacuum];
     }
-    
+
     if (self.shouldSaveToDisk) {
         [self makeDatabaseReadableOnlyByUser];
     }
@@ -254,13 +255,13 @@ static const NSTimeInterval kMaxTimeToRememberDirectories = 60 * 60 * 24 * 90;
             XLog(@"Failed to get attributes of %@: %@", fullPath, error);
             continue;
         }
-        
+
         NSNumber *permissionsNumber = attributes[NSFilePosixPermissions];
         if (!permissionsNumber) {
             XLog(@"Couldn't get permissions of file %@. Attributes are: %@", fullPath, attributes);
             continue;
         }
-        
+
         short posixPermissions = [permissionsNumber shortValue];
         short fixedPosixPermissions = (posixPermissions & 0700);  // Remove other and group permissions.
         if (fixedPosixPermissions != posixPermissions) {
@@ -547,7 +548,7 @@ static const NSTimeInterval kMaxTimeToRememberDirectories = 60 * 60 * 24 * 90;
        inDirectory:(NSString *)directory
           withMark:(VT100ScreenMark *)mark {
     [[NSUserDefaults standardUserDefaults] setBool:YES forKey:kCommandHistoryHasEverBeenUsed];
-    
+
     iTermHostRecordMO *hostRecord = [self recordForHost:host];
     if (!hostRecord) {
         hostRecord = [iTermHostRecordMO hostRecordInContext:_managedObjectContext];
@@ -555,7 +556,7 @@ static const NSTimeInterval kMaxTimeToRememberDirectories = 60 * 60 * 24 * 90;
         hostRecord.username = host.username;
         [self setRecord:hostRecord forHost:host];
     }
-    
+
     iTermCommandHistoryEntryMO *theEntry = nil;
     for (iTermCommandHistoryEntryMO *entry in hostRecord.entries) {
         if ([entry.command isEqualToString:command]) {
@@ -563,16 +564,16 @@ static const NSTimeInterval kMaxTimeToRememberDirectories = 60 * 60 * 24 * 90;
             break;
         }
     }
-    
+
     if (!theEntry) {
         theEntry = [iTermCommandHistoryEntryMO commandHistoryEntryInContext:_managedObjectContext];
         theEntry.command = command;
         [hostRecord addEntriesObject:theEntry];
     }
-    
+
     theEntry.numberOfUses = @(theEntry.numberOfUses.integerValue + 1);
     theEntry.timeOfLastUse = @([self now]);
-    
+
     iTermCommandHistoryCommandUseMO *commandUse =
     [iTermCommandHistoryCommandUseMO commandHistoryCommandUseInContext:_managedObjectContext];
     commandUse.time = theEntry.timeOfLastUse;
@@ -580,7 +581,7 @@ static const NSTimeInterval kMaxTimeToRememberDirectories = 60 * 60 * 24 * 90;
     commandUse.directory = directory;
     commandUse.command = theEntry.command;
     [theEntry addUsesObject:commandUse];
-    
+
     NSString *key = host.key ?: @"";
     if (_expandedCache[key]) {
         [_expandedCache[key] addObject:commandUse];
@@ -793,6 +794,29 @@ static const NSTimeInterval kMaxTimeToRememberDirectories = 60 * 60 * 24 * 90;
     for (iTermRecentDirectoryMO *directory in directories) {
         iTermHostRecordMO *hostRecord = directory.remoteHost;
         [hostRecord removeDirectoriesObject:directory];
+        [_managedObjectContext deleteObject:directory];
+    }
+
+    // Only save the most recent 1000 directories
+    static const NSInteger iTermMaxDirectoriesToSave = 1000;
+
+    NSSortDescriptor *lastUseDescriptor = [[[NSSortDescriptor alloc] initWithKey:@"lastUse"
+                                                                       ascending:NO
+                                                                        selector:@selector(compare:)] autorelease];
+    fetchRequest = [[[NSFetchRequest alloc] init] autorelease];
+    [fetchRequest setEntity:[NSEntityDescription entityForName:[iTermRecentDirectoryMO entityName]
+                                        inManagedObjectContext:_managedObjectContext]];
+    [fetchRequest setSortDescriptors:@[ lastUseDescriptor ]];
+    predicate = [NSPredicate predicateWithFormat:@"starred == 0"];
+    [fetchRequest setPredicate:predicate];
+    error = nil;
+    directories = [_managedObjectContext executeFetchRequest:fetchRequest error:&error];
+    if (directories.count > iTermMaxDirectoriesToSave) {
+        for (iTermRecentDirectoryMO *directory in [directories subarrayFromIndex:iTermMaxDirectoriesToSave]) {
+            iTermHostRecordMO *hostRecord = directory.remoteHost;
+            [hostRecord removeDirectoriesObject:directory];
+            [_managedObjectContext deleteObject:directory];
+        }
     }
 
     error = nil;

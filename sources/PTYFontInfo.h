@@ -22,6 +22,17 @@
 
 + (PTYFontInfo *)fontInfoWithFont:(NSFont *)font;
 
+// renderBold and renderItalic are inout parameters. Pass in whether you want bold/italic and the
+// resulting value is whether it should be rendered as fake bold/italic.
++ (PTYFontInfo *)fontForAsciiCharacter:(BOOL)isAscii
+                             asciiFont:(PTYFontInfo *)asciiFont
+                          nonAsciiFont:(PTYFontInfo *)nonAsciiFont
+                           useBoldFont:(BOOL)useBoldFont
+                         useItalicFont:(BOOL)useItalicFont
+                      usesNonAsciiFont:(BOOL)useNonAsciiFont
+                            renderBold:(BOOL *)renderBold
+                          renderItalic:(BOOL *)renderItalic;
+
 // Returns a new autorelased PTYFontInfo with a bold version of this font (or
 // nil if none is available).
 - (PTYFontInfo *)computedBoldVersion;

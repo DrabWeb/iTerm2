@@ -192,12 +192,26 @@ typedef NS_ENUM(NSInteger, PTYTextViewSelectionExtensionUnit) {
 - (VT100GridCoord)textViewCopyModeCursorCoord;
 - (BOOL)textViewPasswordInput;
 - (void)textViewDidSelectRangeForFindOnPage:(VT100GridCoordRange)range;
+- (void)textViewNeedsDisplayInRect:(NSRect)rect;
+- (void)textViewDidSelectPasswordPrompt;
+- (NSImage *)textViewBackgroundImage;
+- (BOOL)backgroundImageTiled;
+- (BOOL)textViewShouldDrawRect;
+- (void)textViewDidHighightMark;
 
+@end
+
+@interface iTermHighlightedRow : NSObject
+@property (nonatomic, readonly) long long absoluteLineNumber;
+@property (nonatomic, readonly) NSTimeInterval creationDate;
+@property (nonatomic, readonly) BOOL success;
 @end
 
 @interface PTYTextView : NSView <
   iTermColorMapDelegate,
+  iTermIndicatorsHelperDelegate,
   iTermSemanticHistoryControllerDelegate,
+  iTermTextDrawingHelperDelegate,
   NSDraggingDestination,
   NSTextInputClient,
   PointerControllerDelegate>
@@ -271,12 +285,18 @@ typedef NS_ENUM(NSInteger, PTYTextViewSelectionExtensionUnit) {
 @property(nonatomic, readonly) NSFont *font;
 @property(nonatomic, readonly) NSFont *nonAsciiFont;
 
+@property(nonatomic, readonly) PTYFontInfo *primaryFont;
+@property(nonatomic, readonly) PTYFontInfo *secondaryFont;  // non-ascii font, only used if self.useNonAsciiFont is set.
+
 // Returns the non-ascii font, even if it's not being used.
 @property(nonatomic, readonly) NSFont *nonAsciiFontEvenIfNotUsed;
 
 // Size of a character.
 @property(nonatomic, readonly) double lineHeight;
 @property(nonatomic, readonly) double charWidth;
+
+@property(nonatomic, readonly) double charWidthWithoutSpacing;
+@property(nonatomic, readonly) double charHeightWithoutSpacing;
 
 // Is the cursor visible? Defaults to YES.
 @property(nonatomic, assign) BOOL cursorVisible;
@@ -322,6 +342,24 @@ typedef void (^PTYTextViewDrawingHookBlock)(iTermTextDrawingHelper *);
 
 // Lines that are currently visible on the screen.
 @property(nonatomic, readonly) VT100GridRange rangeOfVisibleLines;
+
+// Helps drawing text and background.
+@property (nonatomic, readonly) iTermTextDrawingHelper *drawingHelper;
+
+@property (nonatomic, readonly) double transparencyAlpha;
+
+// Number of times -stealKeyFocus has been called since the last time it
+// was released with releaseKeyFocus.
+@property (nonatomic, readonly) int keyFocusStolenCount;
+
+// Is the cursor eligible to blink?
+@property (nonatomic, readonly) BOOL isCursorBlinking;
+
+@property (nonatomic, readonly) iTermIndicatorsHelper *indicatorsHelper;
+
+@property (nonatomic, readonly) NSArray<iTermHighlightedRow *> *highlightedRows;
+
+@property (nonatomic) BOOL suppressDrawing;
 
 // Returns the size of a cell for a given font. hspace and vspace are multipliers and the width
 // and height.
@@ -487,7 +525,7 @@ typedef void (^PTYTextViewDrawingHookBlock)(iTermTextDrawingHelper *);
                          suffix:(NSString *)suffix;
 
 - (PTYFontInfo*)getFontForChar:(UniChar)ch
-                     isComplex:(BOOL)complex
+                     isComplex:(BOOL)isComplex
                     renderBold:(BOOL*)renderBold
                   renderItalic:(BOOL*)renderItalic;
 
@@ -547,6 +585,8 @@ typedef void (^PTYTextViewDrawingHookBlock)(iTermTextDrawingHelper *);
 - (void)setTransparencyAffectsOnlyDefaultBackgroundColor:(BOOL)value;
 
 - (void)showFireworks;
+
+- (BOOL)imageIsVisible:(iTermImageInfo *)image;
 
 #pragma mark - Testing only
 

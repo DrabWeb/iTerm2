@@ -338,6 +338,12 @@ int NumberOfFullLines(screen_char_t* buffer, int length, int width,
     if (length > free_space) {
         return NO;
     }
+    // A line block could hold up to maxint empty lines but that makes
+    // -dictionary return a very large serialized state.
+    static const int iTermLineBlockMaxLines = 10000;
+    if (cll_entries >= iTermLineBlockMaxLines) {
+        return NO;
+    }
     memcpy(raw_buffer + space_used, buffer, sizeof(screen_char_t) * length);
     // There's an edge case here. In the else clause, the line buffer looks like this originally:
     //   |xxxx| EOL_SOFT
@@ -455,6 +461,7 @@ int NumberOfFullLines(screen_char_t* buffer, int length, int width,
                              width:(int)width
                           metadata:(LineBlockMetadata *)metadata {
     assert(gEnableDoubleWidthCharacterLineCache);
+    ITBetaAssert(n >= 0, @"Negative lines to offsetOfWrappedLineInBuffer");
     if (_mayHaveDoubleWidthCharacter) {
         if (!metadata->double_width_characters ||
             metadata->width_for_double_width_characters_cache != width) {
@@ -464,7 +471,7 @@ int NumberOfFullLines(screen_char_t* buffer, int length, int width,
         __block int lines = 0;
         __block int i = 0;
         __block NSUInteger lastIndex = 0;
-        [metadata->double_width_characters enumerateIndexesInRange:NSMakeRange(0, n + 1)
+        [metadata->double_width_characters enumerateIndexesInRange:NSMakeRange(0, MAX(0, n + 1))
                                                            options:0
                                                         usingBlock:^(NSUInteger indexOfLineThatWouldStartWithRightHalf, BOOL * _Nonnull stop) {
             int numberOfLines = indexOfLineThatWouldStartWithRightHalf - lastIndex;
@@ -550,6 +557,7 @@ int OffsetOfWrappedLine(screen_char_t* p, int n, int length, int width, BOOL may
                                       yOffset:(int*)yOffsetPtr
                                  continuation:(screen_char_t *)continuationPtr
 {
+    ITBetaAssert(*lineNum >= 0, @"Negative lines to getWrappedLineWithWrapWidth");
     int prev = 0;
     int numEmptyLines = 0;
     for (int i = first_entry; i < cll_entries; ++i) {
@@ -586,6 +594,7 @@ int OffsetOfWrappedLine(screen_char_t* p, int n, int length, int width, BOOL may
             // Consume the entire raw line and keep looking for more.
             int consume = spans + 1;
             *lineNum -= consume;
+            ITBetaAssert(*lineNum >= 0, @"Negative lines after consuming spans");
         } else {  // *lineNum <= spans
             // We found the raw line that inclues the wrapped line we're searching for.
             // eat up *lineNum many width-sized wrapped lines from this start of the current full line
@@ -642,8 +651,9 @@ int OffsetOfWrappedLine(screen_char_t* p, int n, int length, int width, BOOL may
     return NULL;
 }
 
-- (int) getNumLinesWithWrapWidth: (int) width
-{
+- (int)getNumLinesWithWrapWidth:(int)width {
+    ITBetaAssert(width > 0, @"Bogus value of width: %d", width);
+
     if (width == cached_numlines_width) {
         return cached_numlines;
     }
@@ -1031,16 +1041,22 @@ static int CoreSearch(NSString *needle,
         if (!regexError && range.location != NSNotFound) {
             if (hasSuffix && range.location + range.length == [sandwich length]) {
                 // match includes $
-                --range.length;
-                if (range.length == 0) {
+                if (range.length > 0) {
+                    --range.length;
+                }
+                if (range.length == 0 && range.location > 0) {
                     // matched only on $
                     --range.location;
                 }
             }
             if (hasPrefix && range.location == 0) {
-                --range.length;
+                if (range.length > 0) {
+                    --range.length;
+                }
             } else if (hasPrefix) {
-                --range.location;
+                if (range.location > 0) {
+                    --range.location;
+                }
             }
         }
         if (range.length <= 0) {

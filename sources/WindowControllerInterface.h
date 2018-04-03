@@ -7,6 +7,7 @@
 #import "PTYWindow.h"
 
 @class iTermPopupWindowController;
+@class iTermRestorableSession;
 @class PSMTabBarControl;
 @class PTYSession;
 @class PTYTab;
@@ -38,6 +39,7 @@ typedef NS_ENUM(NSInteger, BroadcastMode) {
 // Returns true if the window is fullscreen in either Lion-style or
 // pre-Lion-style fullscreen.
 - (BOOL)anyFullScreen;
+- (BOOL)movesWhenDraggedOntoSelf;
 
 // Close a session
 - (void)closeSession:(PTYSession*)aSession;
@@ -100,6 +102,7 @@ typedef NS_ENUM(NSInteger, BroadcastMode) {
 // Is the toolbelt visible for this window?
 @property(nonatomic, readonly) BOOL shouldShowToolbelt;
 @property(nonatomic, readonly) NSArray *tabs;
+@property(nonatomic, readonly) BOOL windowIsResizing;
 
 #pragma mark - Basics
 
@@ -173,6 +176,8 @@ typedef NS_ENUM(NSInteger, BroadcastMode) {
 
 - (void)currentSessionWordAtCursorDidBecome:(NSString *)word;
 
+- (void)storeWindowStateInRestorableSession:(iTermRestorableSession *)restorableSession;
+
 #pragma mark - Tabs
 
 // Close a tab and resize/close the window if needed.
@@ -228,6 +233,8 @@ typedef NS_ENUM(NSInteger, BroadcastMode) {
 // Returns the tab associated with a session.
 - (PTYTab *)tabForSession:(PTYSession *)session;
 
+- (void)tabTitleDidChange:(PTYTab *)tab;
+
 #pragma mark - Sessions
 
 // Set the session name. If theSessionName is nil then set it to the pathname
@@ -272,6 +279,8 @@ typedef NS_ENUM(NSInteger, BroadcastMode) {
 - (void)toggleUseTransparency:(id)sender;
 
 - (void)openPasswordManagerToAccountName:(NSString *)name inSession:(PTYSession *)session;
+
+- (void)tabDidClearScrollbackBufferInSession:(PTYSession *)session;
 
 #pragma mark - Instant replay
 

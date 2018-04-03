@@ -27,12 +27,14 @@
 
 #import <Cocoa/Cocoa.h>
 #import "FindViewController.h"
+#import "iTermMetalDriver.h"
 #import "PTYScrollView.h"
 #import "PTYSession.h"
 #import "SessionTitleView.h"
 #import "SplitSelectionView.h"
 
 @class iTermAnnouncementViewController;
+@class iTermMetalDriver;
 @class PTYSession;
 @class SplitSelectionView;
 @class SessionTitleView;
@@ -113,6 +115,19 @@
 // Make the textview the first responder
 - (void)sessionViewBecomeFirstResponder;
 
+// Current window changed.
+- (void)sessionViewDidChangeWindow;
+
+// Announcement shown, changed, or removed.
+- (void)sessionViewAnnouncementDidChange:(SessionView *)sessionView;
+
+- (void)sessionViewHideMetalViewUntilNextFrame;
+
+- (void)sessionViewUserScrollDidChange:(BOOL)userScroll;
+
+- (void)sessionViewDidChangeHoverURLVisible:(BOOL)visible;
+- (void)sessionViewNeedsMetalFrameUpdate;
+
 @end
 
 @interface SessionView : NSView <SessionTitleViewDelegate>
@@ -124,11 +139,17 @@
 @property(nonatomic, readonly) iTermAnnouncementViewController *currentAnnouncement;
 @property(nonatomic, assign) id<iTermSessionViewDelegate> delegate;
 @property(nonatomic, readonly) PTYScrollView *scrollview;
-@property(nonatomic, assign) BOOL useSubviewWithLayer;
+@property(nonatomic, readonly) PTYScroller *verticalScroller;
+@property(nonatomic, readonly) iTermMetalDriver *driver NS_AVAILABLE_MAC(10_11);
+@property(nonatomic, readonly) MTKView *metalView NS_AVAILABLE_MAC(10_11);
+@property(nonatomic, readonly) BOOL useMetal NS_AVAILABLE_MAC(10_11);
+- (void)setUseMetal:(BOOL)useMetal dataSource:(id<iTermMetalDriverDataSource>)dataSource NS_AVAILABLE_MAC(10_11);;
 
 + (double)titleHeight;
 + (NSDate*)lastResizeDate;
 + (void)windowDidResize;
+
+- (void)setMetalViewNeedsDisplayInTextViewRect:(NSRect)textViewRect NS_AVAILABLE_MAC(10_11);
 
 - (void)setDimmed:(BOOL)isDimmed;
 - (FindViewController*)findViewController;
@@ -168,5 +189,8 @@
 - (SplitSessionHalf)removeSplitSelectionView;
 
 - (void)setHoverURL:(NSString *)url;
+- (BOOL)hasHoverURL;
+- (BOOL)drawFrameSynchronously;
+- (void)reallyUpdateMetalViewFrame;
 
 @end

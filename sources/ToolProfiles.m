@@ -26,10 +26,11 @@ static const CGFloat kInnerMargin = 5;
 - (instancetype)initWithFrame:(NSRect)frame {
     self = [super initWithFrame:frame];
     if (self) {
-        listView_ = [[ProfileListView alloc] initWithFrame:NSMakeRect(kMargin, 0, frame.size.width - kMargin * 2, frame.size.height - kPopupHeight - kVerticalMargin)];
+        listView_ = [[ProfileListView alloc] initWithFrame:NSMakeRect(kMargin, 0, frame.size.width - kMargin * 2, frame.size.height - kPopupHeight - kVerticalMargin)
+                                                     model:[ProfileModel sharedInstance]
+                                                      font:[NSFont systemFontOfSize:[NSFont smallSystemFontSize]]];
         [listView_ setAutoresizingMask:NSViewWidthSizable | NSViewHeightSizable];
         [listView_ setDelegate:self];
-        [listView_ setFont:[NSFont systemFontOfSize:[NSFont smallSystemFontSize]]];
         [listView_ disableArrowHandler];
         [listView_ allowMultipleSelections];
         [listView_.tableView setHeaderView:nil];
@@ -104,7 +105,7 @@ static const CGFloat kInnerMargin = 5;
         Profile* bookmark = [[ProfileModel sharedInstance] bookmarkWithGuid:guid];
         [[iTermController sharedInstance] launchBookmark:bookmark
                                               inTerminal:terminal];
-    }    
+    }
 }
 
 - (void)toolProfilesNewWindow:(id)sender
@@ -113,7 +114,7 @@ static const CGFloat kInnerMargin = 5;
         Profile* bookmark = [[ProfileModel sharedInstance] bookmarkWithGuid:guid];
         [[iTermController sharedInstance] launchBookmark:bookmark
                                               inTerminal:nil];
-    }    
+    }
 }
 
 - (void)toolProfilesNewHorizontalSplit:(id)sender
@@ -121,7 +122,7 @@ static const CGFloat kInnerMargin = 5;
     PseudoTerminal* terminal = [[iTermController sharedInstance] currentTerminal];
     for (NSString* guid in [listView_ selectedGuids]) {
         [terminal splitVertically:NO withBookmarkGuid:guid];
-    }    
+    }
 }
 
 - (void)toolProfilesNewVerticalSplit:(id)sender

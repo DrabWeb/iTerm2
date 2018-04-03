@@ -151,7 +151,7 @@ const CGFloat kEdgeWidth = 3;
 
     const CGFloat maximumWidth = cellFrame.size.width - 1.0;
     NSRect blueRect = NSMakeRect(0, 0, maximumWidth * [self fraction] + kEdgeWidth, cellFrame.size.height);
-    
+
     const CGFloat alpha = 0.3 * _alphaMultiplier;
     [[NSColor colorWithCalibratedRed:0.6
                                green:0.6
@@ -257,7 +257,7 @@ const CGFloat kEdgeWidth = 3;
                                                      name:@"iTermLoadFindStringFromSharedPasteboard"
                                                    object:nil];
         [self loadView];
-        self.view.wantsLayer = [iTermAdvancedSettingsModel useLayers];
+        self.view.wantsLayer = [iTermAdvancedSettingsModel useMetal];
         [[self view] setHidden:YES];
     }
     return self;
@@ -339,6 +339,8 @@ const CGFloat kEdgeWidth = 3;
     [[NSAnimationContext currentContext] setCompletionHandler:^{
         [[self view] setHidden:YES];
         [[[[self view] window] contentView] setNeedsDisplay:YES];
+        _isVisible = NO;
+        [self.delegate findViewControllerVisibilityDidChange:self];
     }];
     [[NSAnimationContext currentContext] setDuration:kAnimationDuration];
     [[[self view] animator] setFrame:[self collapsedFrame]];
@@ -363,10 +365,20 @@ const CGFloat kEdgeWidth = 3;
 }
 
 - (void)open {
+    if ([findBarTextField_.window.appearance.name isEqual:NSAppearanceNameVibrantDark]) {
+        findBarTextField_.appearance = [NSAppearance appearanceNamed:NSAppearanceNameVibrantLight];
+    } else {
+        findBarTextField_.appearance = nil;
+    }
+
     if (savedState_) {
         [self restoreState];
         findBarTextField_.stringValue = state_.string;
     }
+
+    _isVisible = YES;
+    [self.delegate findViewControllerVisibilityDidChange:self];
+
     [[self view] setFrame:[self collapsedFrame]];
     [[self view] setHidden:NO];
     [[NSAnimationContext currentContext] setDuration:kAnimationDuration];

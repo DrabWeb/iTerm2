@@ -10,6 +10,8 @@
 
 @interface NSArray<ObjectType> (iTerm)
 
++ (NSArray<NSNumber *> *)sequenceWithRange:(NSRange)range;
+
 - (NSArray *)objectsOfClasses:(NSArray<Class> *)classes;
 - (NSAttributedString *)attributedComponentsJoinedByAttributedString:(NSAttributedString *)joiner;
 
@@ -18,6 +20,7 @@
 - (NSArray *)flatMapWithBlock:(NSArray *(^)(ObjectType anObject))block;
 
 - (id)reduceWithBlock:(id (^)(ObjectType first, ObjectType second))block;
+- (id)reduceWithFirstValue:(id)firstValue block:(id (^)(id first, ObjectType second))block;
 
 // Returns those elements of the array for which block(element) returns YES.
 // block is called on every element in order.
@@ -30,6 +33,9 @@
 - (BOOL)anyWithBlock:(BOOL (^)(ObjectType anObject))block;
 - (BOOL)allWithBlock:(BOOL (^)(ObjectType anObject))block;
 - (ObjectType)maxWithComparator:(NSComparisonResult (^)(ObjectType a, ObjectType b))comparator;
+
+// All objects equal to the minimum value.
+- (NSArray *)mininumsWithComparator:(NSComparisonResult (^)(id, id))comparator;
 
 // Does the array contain at least one object not equal to @c anObject?
 - (BOOL)containsObjectBesides:(ObjectType)anObject;
@@ -74,6 +80,8 @@
 
 - (NSArray<ObjectType> *)subarrayFromIndex:(NSUInteger)index;
 
+- (void)enumerateCoalescedObjectsWithComparator:(BOOL (^)(ObjectType obj1, ObjectType obj2))comparator
+                                          block:(void (^)(ObjectType object, NSUInteger count))block;
 @end
 
 @interface NSMutableArray<ObjectType> (iTerm)

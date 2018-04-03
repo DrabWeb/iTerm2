@@ -33,10 +33,15 @@
 
 @implementation TextViewWrapper {
     PTYTextView *child_;
+    BOOL _needsClear;
 }
 
-- (void)drawRect:(NSRect)rect
-{
+- (void)drawRect:(NSRect)rect {
+    if (_useMetal) {
+        if (!_needsClear) {
+            return;
+        }
+    }
     [child_.delegate textViewDrawBackgroundImageInView:self
                                               viewRect:rect
                                 blendDefaultBackground:YES];
@@ -79,6 +84,17 @@
     if (!NSEqualRects(child_.frame, rect)) {
         child_.frame = rect;
     }
+}
+
+- (void)setUseMetal:(BOOL)useMetal {
+    if (useMetal == _useMetal) {
+        return;
+    }
+    if (useMetal) {
+        _needsClear = YES;
+    }
+    _useMetal = useMetal;
+    [self setNeedsDisplay:YES];
 }
 
 @end

@@ -14,6 +14,7 @@
 #import "NSImage+iTerm.h"
 #import "NSStringITerm.h"
 #import "iTermAdvancedSettingsModel.h"
+#import "iTermApplication.h"
 #import "iTermColorPresets.h"
 #import "iTermKeyBindingMgr.h"
 #import "iTermRootTerminalView.h"
@@ -34,6 +35,8 @@ static NSString *const iTermTouchBarIdentifierColorPresetScrollview = @"iTermTou
 static NSString *const iTermTouchBarIdentifierAutocomplete = @"iTermTouchBarIdentifierAutocomplete";
 static NSString *const iTermTouchBarFunctionKeysScrollView  = @"iTermTouchBarFunctionKeysScrollView";
 static NSString *const iTermTouchBarIdentifierStatus = @"iTermTouchBarIdentifierStatus";
+
+static const int iTermTouchBarNumberOfFunctionKeys = 24;
 
 ITERM_IGNORE_PARTIAL_BEGIN
 
@@ -56,6 +59,11 @@ ITERM_IGNORE_PARTIAL_BEGIN
     [self updateStatus];
 }
 
+- (void)updateColorPresets {
+    if (IsTouchBarAvailable() && [self respondsToSelector:@selector(touchBar)]) {
+        [self updateTouchBarIfNeeded:YES];
+    }
+}
 - (void)updateTouchBarWithWordAtCursor:(NSString *)word {
     if (IsTouchBarAvailable() && [self respondsToSelector:@selector(touchBar)]) {
         NSTouchBarItem *item = [self.touchBar itemForIdentifier:iTermTouchBarIdentifierManPage];
@@ -117,14 +125,14 @@ ITERM_IGNORE_PARTIAL_BEGIN
     return touchBar;
 }
 
-- (void)updateTouchBarIfNeeded {
+- (void)updateTouchBarIfNeeded:(BOOL)force {
     if (!self.wellFormed) {
         DLog(@"Not updating touch bar in %@ because not well formed", self);
         return;
     }
     if (IsTouchBarAvailable()) {
         NSTouchBar *replacement = [self amendTouchBar:[self makeGenericTouchBar]];
-        if (![replacement.customizationIdentifier isEqualToString:self.touchBar.customizationIdentifier]) {
+        if (force || ![replacement.customizationIdentifier isEqualToString:self.touchBar.customizationIdentifier]) {
             self.touchBar = replacement;
         } else {
             NSScrubber *scrubber = (NSScrubber *)self.tabsTouchBarItem.view;
@@ -196,7 +204,7 @@ ITERM_IGNORE_PARTIAL_BEGIN
     documentView.translatesAutoresizingMaskIntoConstraints = NO;
     scrollView.documentView = documentView;
     NSButton *previous = nil;
-    for (NSInteger n = 1; n <= 20; n++) {
+    for (NSInteger n = 1; n <= iTermTouchBarNumberOfFunctionKeys; n++) {
         NSString *label = [NSString stringWithFormat:@"F%@", @(n)];
         iTermTouchBarButton *button = [iTermTouchBarButton buttonWithTitle:label target:self action:@selector(functionKeyTouchBarItemSelected:)];
         button.tag = n;
@@ -262,16 +270,7 @@ ITERM_IGNORE_PARTIAL_BEGIN
                                                               constant:0]];
 }
 
-- (NSTouchBarItem *)colorPresetsScrollViewTouchBarItem {
-    if (!IsTouchBarAvailable()) {
-        return nil;
-    }
-    NSScrollView *scrollView = [[[NSScrollView alloc] init] autorelease];
-    NSCustomTouchBarItem *item = [[[NSCustomTouchBarItem alloc] initWithIdentifier:iTermTouchBarIdentifierColorPresetScrollview] autorelease];
-    item.view = scrollView;
-    NSView *documentView = [[NSView alloc] init];
-    documentView.translatesAutoresizingMaskIntoConstraints = NO;
-    scrollView.documentView = documentView;
+- (void)addButtonsToColorPresetsDocumentView:(NSView *)documentView {
     NSButton *previous = nil;
     for (NSDictionary *dict in @[ [iTermColorPresets builtInColorPresets] ?: @{},
                                   [iTermColorPresets customColorPresets] ?: @{} ]) {
@@ -289,7 +288,7 @@ ITERM_IGNORE_PARTIAL_BEGIN
                                                                          attributes:attributes] autorelease];
             button = [iTermTouchBarButton buttonWithTitle:@""
                                                    target:self
-                                                       action:@selector(colorPresetTouchBarItemSelected:)];
+                                                   action:@selector(colorPresetTouchBarItemSelected:)];
             [button sizeToFit];
             button.attributedTitle = title;
             button.bezelColor = backgroundColor;
@@ -303,6 +302,19 @@ ITERM_IGNORE_PARTIAL_BEGIN
     if (previous) {
         [self constrainButton:previous toRightOfSuperview:documentView];
     }
+}
+
+- (NSTouchBarItem *)colorPresetsScrollViewTouchBarItem {
+    if (!IsTouchBarAvailable()) {
+        return nil;
+    }
+    NSScrollView *scrollView = [[[NSScrollView alloc] init] autorelease];
+    NSCustomTouchBarItem *item = [[[NSCustomTouchBarItem alloc] initWithIdentifier:iTermTouchBarIdentifierColorPresetScrollview] autorelease];
+    item.view = scrollView;
+    NSView *documentView = [[NSView alloc] init];
+    documentView.translatesAutoresizingMaskIntoConstraints = NO;
+    scrollView.documentView = documentView;
+    [self addButtonsToColorPresetsDocumentView:documentView];
     return item;
 }
 
@@ -486,12 +498,12 @@ ITERM_IGNORE_PARTIAL_BEGIN
 }
 
 - (void)sendFunctionKeyToCurrentSession:(NSInteger)number {
-    if (number < 1 || number > 20) {
+    if (number < 1 || number > iTermTouchBarNumberOfFunctionKeys) {
         return;
     }
 
     NSEvent *currentEvent = [NSApp currentEvent];
-    unsigned short keyCodes[] = {
+    unsigned short keyCodes[iTermTouchBarNumberOfFunctionKeys] = {
         kVK_F1,
         kVK_F2,
         kVK_F3,
@@ -512,6 +524,11 @@ ITERM_IGNORE_PARTIAL_BEGIN
         kVK_F18,
         kVK_F19,
         kVK_F20,
+        // There is no virtual keycode for these function keys, but it doesn't matter for our purposes.
+        iTermBogusVirtualKeyCode,  // F21
+        iTermBogusVirtualKeyCode,  // F22
+        iTermBogusVirtualKeyCode,  // F23
+        iTermBogusVirtualKeyCode   // F24
     };
     NSString *chars = [NSString stringWithFormat:@"%C", (unichar)(NSF1FunctionKey + number - 1)];
     NSPoint screenPoint = [NSEvent mouseLocation];
@@ -525,7 +542,13 @@ ITERM_IGNORE_PARTIAL_BEGIN
                    charactersIgnoringModifiers:chars
                                      isARepeat:NO
                                        keyCode:keyCodes[number - 1]];
-    [self.currentSession.textview keyDown:event];
+
+    iTermApplication *app = [iTermApplication sharedApplication];
+    if ([app routeEventToShortcutInputView:event]) {
+        return;
+    } else if (self.window.isKeyWindow && self.window.firstResponder == self.currentSession.textview) {
+        [self.currentSession.textview keyDown:event];
+    }
 }
 
 - (void)candidateListTouchBarItem:(NSCandidateListTouchBarItem *)anItem endSelectingCandidateAtIndex:(NSInteger)index {

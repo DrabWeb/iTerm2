@@ -11,12 +11,64 @@
 
 @implementation NSImage (iTerm)
 
++ (NSImage *)imageOfSize:(NSSize)size color:(NSColor *)color {
+    return [self imageOfSize:size drawBlock:^{
+        [color set];
+        NSRectFill(NSMakeRect(0, 0, size.width, size.height));
+    }];
+}
+
++ (instancetype)imageOfSize:(NSSize)size drawBlock:(void (^)(void))block {
+    NSImage *image = [[[NSImage alloc] initWithSize:size] autorelease];
+
+    [image lockFocus];
+    block();
+    [image unlockFocus];
+
+    return image;
+}
+
++ (NSMutableData *)argbDataForImageOfSize:(NSSize)size drawBlock:(void (^)(CGContextRef context))block {
+    NSMutableData *data = [NSMutableData data];
+    CGContextRef context = [NSImage newBitmapContextOfSize:size storage:data];
+    NSGraphicsContext *graphicsContext = [NSGraphicsContext graphicsContextWithCGContext:context flipped:NO];
+    NSGraphicsContext *savedContext = [NSGraphicsContext currentContext];
+    [NSGraphicsContext setCurrentContext:graphicsContext];
+    block(context);
+    [NSGraphicsContext setCurrentContext:savedContext];
+    CGContextRelease(context);
+    return data;
+}
+
++ (NSData *)dataWithFourBytesPerPixelFromDataWithOneBytePerPixel:(NSData *)input {
+    NSMutableData *output = [NSMutableData dataWithLength:input.length * 4];
+    unsigned char *ob = (unsigned char *)output.mutableBytes;
+    unsigned char *ib = (unsigned char *)input.bytes;
+    for (int i = 0; i < input.length; i++) {
+        const int j = i * 4;
+        ob[j + 0] = ib[i];
+        ob[j + 1] = ib[i];
+        ob[j + 2] = ib[i];
+        ob[j + 3] = 255;
+    }
+    return output;
+}
+
 + (instancetype)imageWithRawData:(NSData *)data
                             size:(NSSize)size
                    bitsPerSample:(NSInteger)bitsPerSample
                  samplesPerPixel:(NSInteger)samplesPerPixel
                         hasAlpha:(BOOL)hasAlpha
                   colorSpaceName:(NSString *)colorSpaceName {
+    if (samplesPerPixel == 1) {
+        return [self imageWithRawData:[self dataWithFourBytesPerPixelFromDataWithOneBytePerPixel:data]
+                                 size:size
+                        bitsPerSample:8
+                      samplesPerPixel:4
+                             hasAlpha:YES
+                       colorSpaceName:colorSpaceName];
+    }
+    
     assert(data.length == size.width * size.height * bitsPerSample * samplesPerPixel / 8);
     NSBitmapImageRep *bitmapImageRep =
         [[[NSBitmapImageRep alloc] initWithBitmapDataPlanes:nil  // allocate the pixel buffer for us
@@ -88,8 +140,7 @@
     return destination;
 }
 
-- (CGContextRef)newBitmapContextWithStorage:(NSMutableData *)data {
-  NSSize size = self.size;
++ (CGContextRef)newBitmapContextOfSize:(NSSize)size storage:(NSMutableData *)data {
   NSInteger bytesPerRow = size.width * 4;
   NSUInteger storageNeeded = bytesPerRow * size.height;
   [data setLength:storageNeeded];
@@ -109,6 +160,11 @@
 
 
   return context;
+}
+
+- (CGContextRef)newBitmapContextWithStorage:(NSMutableData *)data {
+    NSSize size = self.size;
+    return [NSImage newBitmapContextOfSize:size storage:data];
 }
 
 - (NSImage *)imageWithColor:(NSColor *)color {
@@ -139,6 +195,10 @@
   CGImageRelease(image);
 
   return coloredImage;
+}
+
+- (void)saveAsPNGTo:(NSString *)filename {
+    [[self dataForFileOfType:NSPNGFileType] writeToFile:filename atomically:NO];
 }
 
 // TODO: Should this use -bitmapImageRep?
@@ -188,8 +248,25 @@
              fraction:1.0];
     [ctx flushGraphics];
     [NSGraphicsContext restoreGraphicsState];
-    
+
     return [rep autorelease];
+}
+
+- (NSImageRep *)bestRepresentationForScale:(CGFloat)desiredScale {
+    NSImageRep *best = nil;
+    double bestScale = 0;
+    CGFloat width = self.size.width;
+    if (width <= 0) {
+        return nil;
+    }
+    for (NSImageRep *rep in self.representations) {
+        const double scale = best.pixelsWide / width;
+        if (!best || fabs(desiredScale - scale) < fabs(desiredScale - bestScale)) {
+            best = rep;
+            bestScale = scale;
+        }
+    }
+    return best;
 }
 
 @end

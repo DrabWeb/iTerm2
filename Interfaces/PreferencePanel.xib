@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<document type="com.apple.InterfaceBuilder3.Cocoa.XIB" version="3.0" toolsVersion="13196" targetRuntime="MacOSX.Cocoa" propertyAccessControl="none">
+<document type="com.apple.InterfaceBuilder3.Cocoa.XIB" version="3.0" toolsVersion="13771" targetRuntime="MacOSX.Cocoa" propertyAccessControl="none">
     <dependencies>
         <deployment identifier="macosx"/>
-        <plugIn identifier="com.apple.InterfaceBuilder.CocoaPlugin" version="13196"/>
+        <plugIn identifier="com.apple.InterfaceBuilder.CocoaPlugin" version="13771"/>
         <capability name="box content view" minToolsVersion="7.0"/>
         <capability name="documents saved in the Xcode 8 format" minToolsVersion="8.0"/>
     </dependencies>
@@ -763,7 +763,7 @@ Gw
                                     <color key="backgroundColor" name="controlBackgroundColor" catalog="System" colorSpace="catalog"/>
                                     <color key="gridColor" name="gridColor" catalog="System" colorSpace="catalog"/>
                                     <tableColumns>
-                                        <tableColumn width="350" minWidth="40" maxWidth="1000" id="5785">
+                                        <tableColumn identifier="" width="350" minWidth="40" maxWidth="1000" id="5785">
                                             <tableHeaderCell key="headerCell" lineBreakMode="truncatingTail" borderStyle="border" alignment="left" title="Regular Expression">
                                                 <font key="font" metaFont="smallSystem"/>
                                                 <color key="textColor" name="headerTextColor" catalog="System" colorSpace="catalog"/>
@@ -776,7 +776,7 @@ Gw
                                             </textFieldCell>
                                             <tableColumnResizingMask key="resizingMask" resizeWithTable="YES" userResizable="YES"/>
                                         </tableColumn>
-                                        <tableColumn width="162.6953125" minWidth="40" maxWidth="1000" id="5786">
+                                        <tableColumn identifier="" width="162.6953125" minWidth="40" maxWidth="1000" id="5786">
                                             <tableHeaderCell key="headerCell" lineBreakMode="truncatingTail" borderStyle="border" alignment="left" title="Action">
                                                 <font key="font" metaFont="smallSystem"/>
                                                 <color key="textColor" name="headerTextColor" catalog="System" colorSpace="catalog"/>
@@ -789,7 +789,7 @@ Gw
                                             </textFieldCell>
                                             <tableColumnResizingMask key="resizingMask" resizeWithTable="YES" userResizable="YES"/>
                                         </tableColumn>
-                                        <tableColumn width="195.59765625" minWidth="40" maxWidth="1000" id="5816">
+                                        <tableColumn identifier="" width="195.59765625" minWidth="40" maxWidth="1000" id="5816">
                                             <tableHeaderCell key="headerCell" lineBreakMode="truncatingTail" borderStyle="border" alignment="left" title="Parameters">
                                                 <font key="font" metaFont="smallSystem"/>
                                                 <color key="textColor" name="headerTextColor" catalog="System" colorSpace="catalog"/>
@@ -802,7 +802,7 @@ Gw
                                             </textFieldCell>
                                             <tableColumnResizingMask key="resizingMask" resizeWithTable="YES" userResizable="YES"/>
                                         </tableColumn>
-                                        <tableColumn width="41" minWidth="10" maxWidth="3.4028234663852886e+38" id="4jW-vz-58j">
+                                        <tableColumn identifier="" width="41" minWidth="10" maxWidth="3.4028234663852886e+38" id="4jW-vz-58j">
                                             <tableHeaderCell key="headerCell" lineBreakMode="truncatingTail" borderStyle="border" alignment="left" title="Instant">
                                                 <font key="font" metaFont="smallSystem"/>
                                                 <color key="textColor" name="headerTextColor" catalog="System" colorSpace="catalog"/>
@@ -923,7 +923,7 @@ DQ
                                     <color key="backgroundColor" name="controlBackgroundColor" catalog="System" colorSpace="catalog"/>
                                     <color key="gridColor" name="gridColor" catalog="System" colorSpace="catalog"/>
                                     <tableColumns>
-                                        <tableColumn width="198" minWidth="10" maxWidth="3.4028234663852886e+38" id="5901">
+                                        <tableColumn identifier="" width="198" minWidth="10" maxWidth="3.4028234663852886e+38" id="5901">
                                             <tableHeaderCell key="headerCell" lineBreakMode="truncatingTail" borderStyle="border" alignment="left" title="Notes">
                                                 <font key="font" metaFont="smallSystem"/>
                                                 <color key="textColor" name="headerTextColor" catalog="System" colorSpace="catalog"/>
@@ -936,7 +936,7 @@ DQ
                                             </textFieldCell>
                                             <tableColumnResizingMask key="resizingMask" resizeWithTable="YES" userResizable="YES"/>
                                         </tableColumn>
-                                        <tableColumn width="468" minWidth="40" maxWidth="1000" id="5850">
+                                        <tableColumn identifier="" width="468" minWidth="40" maxWidth="1000" id="5850">
                                             <tableHeaderCell key="headerCell" lineBreakMode="truncatingTail" borderStyle="border" alignment="left" title="Regular Expression">
                                                 <font key="font" metaFont="smallSystem"/>
                                                 <color key="textColor" name="headerTextColor" catalog="System" colorSpace="catalog"/>
@@ -949,7 +949,7 @@ DQ
                                             </textFieldCell>
                                             <tableColumnResizingMask key="resizingMask" resizeWithTable="YES" userResizable="YES"/>
                                         </tableColumn>
-                                        <tableColumn width="88" minWidth="40" maxWidth="1000" id="5848">
+                                        <tableColumn identifier="" width="88" minWidth="40" maxWidth="1000" id="5848">
                                             <tableHeaderCell key="headerCell" lineBreakMode="truncatingTail" borderStyle="border" alignment="left" title="Precision">
                                                 <font key="font" metaFont="smallSystem"/>
                                                 <color key="textColor" name="headerTextColor" catalog="System" colorSpace="catalog"/>
@@ -1137,7 +1137,7 @@ DQ
                                     <color key="backgroundColor" name="controlBackgroundColor" catalog="System" colorSpace="catalog"/>
                                     <color key="gridColor" name="gridColor" catalog="System" colorSpace="catalog"/>
                                     <tableColumns>
-                                        <tableColumn width="167.40625" minWidth="40" maxWidth="1000" id="6285">
+                                        <tableColumn identifier="" width="167.40625" minWidth="40" maxWidth="1000" id="6285">
                                             <tableHeaderCell key="headerCell" lineBreakMode="truncatingTail" borderStyle="border" alignment="left" title="Title">
                                                 <font key="font" metaFont="smallSystem"/>
                                                 <color key="textColor" name="headerTextColor" catalog="System" colorSpace="catalog"/>
@@ -1150,7 +1150,7 @@ DQ
                                             </textFieldCell>
                                             <tableColumnResizingMask key="resizingMask" resizeWithTable="YES" userResizable="YES"/>
                                         </tableColumn>
-                                        <tableColumn width="170.1953125" minWidth="40" maxWidth="1000" id="6286">
+                                        <tableColumn identifier="" width="170.1953125" minWidth="40" maxWidth="1000" id="6286">
                                             <tableHeaderCell key="headerCell" lineBreakMode="truncatingTail" borderStyle="border" alignment="left" title="Action">
                                                 <font key="font" metaFont="smallSystem"/>
                                                 <color key="textColor" name="headerTextColor" catalog="System" colorSpace="catalog"/>
@@ -1171,7 +1171,7 @@ DQ
                                             </popUpButtonCell>
                                             <tableColumnResizingMask key="resizingMask" resizeWithTable="YES" userResizable="YES"/>
                                         </tableColumn>
-                                        <tableColumn width="186.48828125" minWidth="10" maxWidth="3.4028234663852886e+38" id="6289">
+                                        <tableColumn identifier="" width="186.48828125" minWidth="10" maxWidth="3.4028234663852886e+38" id="6289">
                                             <tableHeaderCell key="headerCell" lineBreakMode="truncatingTail" borderStyle="border" alignment="left" title="Parameter">
                                                 <font key="font" metaFont="smallSystem"/>
                                                 <color key="textColor" name="headerTextColor" catalog="System" colorSpace="catalog"/>
@@ -1436,6 +1436,8 @@ DQ
                 <outlet property="_backgroundColor" destination="2285" id="11Q-XD-XYI"/>
                 <outlet property="_badgeColor" destination="A9a-sA-67D" id="djP-Vq-hVi"/>
                 <outlet property="_boldColor" destination="2272" id="zhk-0J-m9y"/>
+                <outlet property="_bwWarning1" destination="CJu-FZ-K1D" id="gy1-mn-JYT"/>
+                <outlet property="_bwWarning2" destination="eve-jv-6xP" id="jYs-b3-a3w"/>
                 <outlet property="_cursorBoost" destination="evF-qt-9wo" id="zxW-aa-c8U"/>
                 <outlet property="_cursorColor" destination="2280" id="bFx-TT-7QV"/>
                 <outlet property="_cursorColorLabel" destination="2283" id="wkr-Fv-k2e"/>
@@ -1928,7 +1930,7 @@ DQ
             <point key="canvasLocation" x="986.5" y="-712"/>
         </customView>
         <customView id="SCN-fS-hNB" userLabel="Prefs - Profiles - Colors" customClass="iTermSizeRememberingView">
-            <rect key="frame" x="0.0" y="0.0" width="559" height="307"/>
+            <rect key="frame" x="0.0" y="0.0" width="569" height="320"/>
             <autoresizingMask key="autoresizingMask" widthSizable="YES" heightSizable="YES"/>
             <subviews>
                 <textField verticalHuggingPriority="750" allowsCharacterPickerTouchBarItem="YES" id="2284">
@@ -1944,12 +1946,12 @@ DQ
                     <rect key="frame" x="102" y="228" width="32" height="21"/>
                     <autoresizingMask key="autoresizingMask" flexibleMaxX="YES" flexibleMinY="YES"/>
                 </customView>
-                <customView id="2277" customClass="CPKColorWell">
-                    <rect key="frame" x="284" y="228" width="32" height="21"/>
+                <customView misplaced="YES" id="2277" customClass="CPKColorWell">
+                    <rect key="frame" x="304" y="228" width="32" height="21"/>
                     <autoresizingMask key="autoresizingMask" flexibleMaxX="YES" flexibleMinY="YES"/>
                 </customView>
-                <textField verticalHuggingPriority="750" allowsCharacterPickerTouchBarItem="YES" id="2275">
-                    <rect key="frame" x="159" y="256" width="119" height="17"/>
+                <textField verticalHuggingPriority="750" misplaced="YES" allowsCharacterPickerTouchBarItem="YES" id="2275">
+                    <rect key="frame" x="179" y="256" width="119" height="17"/>
                     <autoresizingMask key="autoresizingMask" flexibleMaxX="YES" flexibleMinY="YES"/>
                     <textFieldCell key="cell" sendsActionOnEndEditing="YES" alignment="right" title="Selection" id="2321">
                         <font key="font" metaFont="system"/>
@@ -1974,8 +1976,8 @@ DQ
                     <rect key="frame" x="102" y="176" width="32" height="21"/>
                     <autoresizingMask key="autoresizingMask" flexibleMaxX="YES" flexibleMinY="YES"/>
                 </customView>
-                <textField verticalHuggingPriority="750" allowsCharacterPickerTouchBarItem="YES" id="Pyw-da-Q1y">
-                    <rect key="frame" x="159" y="204" width="119" height="17"/>
+                <textField verticalHuggingPriority="750" misplaced="YES" allowsCharacterPickerTouchBarItem="YES" id="Pyw-da-Q1y">
+                    <rect key="frame" x="179" y="204" width="119" height="17"/>
                     <autoresizingMask key="autoresizingMask" flexibleMaxX="YES" flexibleMinY="YES"/>
                     <textFieldCell key="cell" sendsActionOnEndEditing="YES" alignment="right" title="Badge" id="iUy-lI-rM5">
                         <font key="font" metaFont="system"/>
@@ -1983,8 +1985,8 @@ DQ
                         <color key="backgroundColor" name="controlColor" catalog="System" colorSpace="catalog"/>
                     </textFieldCell>
                 </textField>
-                <customView id="A9a-sA-67D" customClass="CPKColorWell">
-                    <rect key="frame" x="284" y="202" width="32" height="21"/>
+                <customView misplaced="YES" id="A9a-sA-67D" customClass="CPKColorWell">
+                    <rect key="frame" x="304" y="202" width="32" height="21"/>
                     <autoresizingMask key="autoresizingMask" flexibleMaxX="YES" flexibleMinY="YES"/>
                     <userDefinedRuntimeAttributes>
                         <userDefinedRuntimeAttribute type="boolean" keyPath="alphaAllowed" value="YES"/>
@@ -1994,8 +1996,8 @@ DQ
                     <rect key="frame" x="102" y="254" width="32" height="21"/>
                     <autoresizingMask key="autoresizingMask" flexibleMaxX="YES" flexibleMinY="YES"/>
                 </customView>
-                <textField verticalHuggingPriority="750" allowsCharacterPickerTouchBarItem="YES" id="2274">
-                    <rect key="frame" x="159" y="230" width="119" height="17"/>
+                <textField verticalHuggingPriority="750" misplaced="YES" allowsCharacterPickerTouchBarItem="YES" id="2274">
+                    <rect key="frame" x="179" y="230" width="119" height="17"/>
                     <autoresizingMask key="autoresizingMask" flexibleMaxX="YES" flexibleMinY="YES"/>
                     <textFieldCell key="cell" sendsActionOnEndEditing="YES" alignment="right" title="Selected Text" id="2322">
                         <font key="font" metaFont="system"/>
@@ -2003,8 +2005,8 @@ DQ
                         <color key="backgroundColor" name="controlColor" catalog="System" colorSpace="catalog"/>
                     </textFieldCell>
                 </textField>
-                <customView id="Wzz-9B-zqB" customClass="CPKColorWell">
-                    <rect key="frame" x="284" y="176" width="32" height="21"/>
+                <customView misplaced="YES" id="Wzz-9B-zqB" customClass="CPKColorWell">
+                    <rect key="frame" x="304" y="176" width="32" height="21"/>
                     <autoresizingMask key="autoresizingMask" flexibleMaxX="YES" flexibleMinY="YES"/>
                 </customView>
                 <textField verticalHuggingPriority="750" allowsCharacterPickerTouchBarItem="YES" id="2281">
@@ -2016,12 +2018,12 @@ DQ
                         <color key="backgroundColor" name="controlColor" catalog="System" colorSpace="catalog"/>
                     </textFieldCell>
                 </textField>
-                <customView id="2282" customClass="CPKColorWell">
-                    <rect key="frame" x="284" y="254" width="32" height="21"/>
+                <customView misplaced="YES" id="2282" customClass="CPKColorWell">
+                    <rect key="frame" x="304" y="254" width="32" height="21"/>
                     <autoresizingMask key="autoresizingMask" flexibleMaxX="YES" flexibleMinY="YES"/>
                 </customView>
-                <button id="j7F-r8-oes">
-                    <rect key="frame" x="195" y="177" width="83" height="18"/>
+                <button misplaced="YES" id="j7F-r8-oes">
+                    <rect key="frame" x="215" y="177" width="83" height="18"/>
                     <autoresizingMask key="autoresizingMask" flexibleMaxX="YES" flexibleMinY="YES"/>
                     <buttonCell key="cell" type="check" title="Tab Color" bezelStyle="regularSquare" imagePosition="left" alignment="right" state="on" inset="2" id="k6J-9z-fqf">
                         <behavior key="behavior" changeContents="YES" doesNotDimImage="YES" lightByContents="YES"/>
@@ -2032,12 +2034,12 @@ DQ
                         <outlet property="nextKeyView" destination="4896" id="WKO-8m-Sev"/>
                     </connections>
                 </button>
-                <customView id="rSL-fL-hpc" customClass="CPKColorWell">
-                    <rect key="frame" x="284" y="149" width="32" height="21"/>
+                <customView misplaced="YES" id="rSL-fL-hpc" customClass="CPKColorWell">
+                    <rect key="frame" x="304" y="149" width="32" height="21"/>
                     <autoresizingMask key="autoresizingMask" flexibleMaxX="YES" flexibleMinY="YES"/>
                 </customView>
-                <button id="Cqf-RZ-UnO">
-                    <rect key="frame" x="161" y="150" width="117" height="18"/>
+                <button misplaced="YES" id="Cqf-RZ-UnO">
+                    <rect key="frame" x="181" y="150" width="117" height="18"/>
                     <autoresizingMask key="autoresizingMask" flexibleMaxX="YES" flexibleMinY="YES"/>
                     <buttonCell key="cell" type="check" title="Underline Color" bezelStyle="regularSquare" imagePosition="left" alignment="right" inset="2" id="FlU-a8-6X7">
                         <behavior key="behavior" changeContents="YES" doesNotDimImage="YES" lightByContents="YES"/>
@@ -2048,8 +2050,8 @@ DQ
                         <outlet property="nextKeyView" destination="4896" id="acz-bU-TQP"/>
                     </connections>
                 </button>
-                <slider verticalHuggingPriority="750" id="4896">
-                    <rect key="frame" x="141" y="125" width="179" height="20"/>
+                <slider verticalHuggingPriority="750" misplaced="YES" id="4896">
+                    <rect key="frame" x="141" y="125" width="197" height="20"/>
                     <autoresizingMask key="autoresizingMask" flexibleMaxX="YES" flexibleMinY="YES"/>
                     <string key="toolTip">This boosts the contrast of text when its color is close to that of the background color by moving the text color towards black or white.</string>
                     <sliderCell key="cell" continuous="YES" alignment="left" maxValue="1" tickMarkPosition="above" sliderType="linear" id="4903"/>
@@ -2061,7 +2063,7 @@ DQ
                 <textField verticalHuggingPriority="750" allowsCharacterPickerTouchBarItem="YES" id="4899">
                     <rect key="frame" x="10" y="127" width="128" height="17"/>
                     <autoresizingMask key="autoresizingMask" flexibleMaxX="YES" flexibleMinY="YES"/>
-                    <textFieldCell key="cell" scrollable="YES" lineBreakMode="clipping" sendsActionOnEndEditing="YES" alignment="right" title="Minimum contrast:" id="4900">
+                    <textFieldCell key="cell" scrollable="YES" lineBreakMode="clipping" sendsActionOnEndEditing="YES" alignment="right" title="Minimum Contrast:" id="4900">
                         <font key="font" metaFont="system"/>
                         <color key="textColor" name="controlTextColor" catalog="System" colorSpace="catalog"/>
                         <color key="backgroundColor" name="controlColor" catalog="System" colorSpace="catalog"/>
@@ -2080,15 +2082,15 @@ DQ
                         <color key="backgroundColor" name="controlColor" catalog="System" colorSpace="catalog"/>
                     </textFieldCell>
                 </textField>
-                <customView id="Yny-j0-8Wk" customClass="CPKColorWell">
-                    <rect key="frame" x="284" y="73" width="32" height="21"/>
+                <customView misplaced="YES" id="Yny-j0-8Wk" customClass="CPKColorWell">
+                    <rect key="frame" x="304" y="73" width="32" height="21"/>
                     <autoresizingMask key="autoresizingMask" flexibleMaxX="YES" flexibleMinY="YES"/>
                     <userDefinedRuntimeAttributes>
                         <userDefinedRuntimeAttribute type="boolean" keyPath="alphaAllowed" value="YES"/>
                     </userDefinedRuntimeAttributes>
                 </customView>
-                <slider verticalHuggingPriority="750" id="evF-qt-9wo" userLabel="Horizontal Slider - Cursor Boost">
-                    <rect key="frame" x="139" y="18" width="179" height="20"/>
+                <slider verticalHuggingPriority="750" misplaced="YES" id="evF-qt-9wo" userLabel="Horizontal Slider - Cursor Boost">
+                    <rect key="frame" x="139" y="18" width="199" height="20"/>
                     <autoresizingMask key="autoresizingMask" flexibleMaxX="YES" flexibleMinY="YES"/>
                     <string key="toolTip">This dims all colors except that of the cursor. A pure white cursor with Smart Cursor Color off is recommended when using cursor boost.</string>
                     <sliderCell key="cell" continuous="YES" alignment="left" maxValue="0.80000000000000004" tickMarkPosition="above" sliderType="linear" id="gKT-qi-eSF"/>
@@ -2098,9 +2100,9 @@ DQ
                     </connections>
                 </slider>
                 <button id="4889">
-                    <rect key="frame" x="173" y="45" width="151" height="18"/>
+                    <rect key="frame" x="173" y="45" width="165" height="18"/>
                     <autoresizingMask key="autoresizingMask" flexibleMaxX="YES" flexibleMinY="YES"/>
-                    <buttonCell key="cell" type="check" title="Smart Cursor Color" bezelStyle="regularSquare" imagePosition="left" alignment="left" state="on" inset="2" id="4890">
+                    <buttonCell key="cell" type="check" title="Smart Box Cursor Color" bezelStyle="regularSquare" imagePosition="left" alignment="left" state="on" inset="2" id="4890">
                         <behavior key="behavior" changeContents="YES" doesNotDimImage="YES" lightByContents="YES"/>
                         <font key="font" metaFont="system"/>
                     </buttonCell>
@@ -2131,8 +2133,8 @@ DQ
                     <rect key="frame" x="102" y="73" width="32" height="20"/>
                     <autoresizingMask key="autoresizingMask" flexibleMaxX="YES" flexibleMinY="YES"/>
                 </customView>
-                <button id="Rpk-o3-4ec">
-                    <rect key="frame" x="173" y="74" width="105" height="18"/>
+                <button misplaced="YES" id="Rpk-o3-4ec">
+                    <rect key="frame" x="193" y="74" width="105" height="18"/>
                     <autoresizingMask key="autoresizingMask" flexibleMaxX="YES" flexibleMinY="YES"/>
                     <buttonCell key="cell" type="check" title="Cursor Guide" bezelStyle="regularSquare" imagePosition="left" alignment="left" state="on" inset="2" id="Ai2-im-FjJ">
                         <behavior key="behavior" changeContents="YES" doesNotDimImage="YES" lightByContents="YES"/>
@@ -2349,7 +2351,26 @@ DQ
                         <color key="backgroundColor" name="controlColor" catalog="System" colorSpace="catalog"/>
                     </textFieldCell>
                 </textField>
+                <textField hidden="YES" horizontalHuggingPriority="251" verticalHuggingPriority="750" misplaced="YES" id="eve-jv-6xP">
+                    <rect key="frame" x="173" y="113" width="165" height="14"/>
+                    <autoresizingMask key="autoresizingMask" flexibleMaxX="YES" flexibleMinY="YES"/>
+                    <textFieldCell key="cell" controlSize="small" scrollable="YES" lineBreakMode="clipping" sendsActionOnEndEditing="YES" alignment="right" title="All text will be black or white" id="9wh-0G-sEv">
+                        <font key="font" metaFont="smallSystemBold"/>
+                        <color key="textColor" name="labelColor" catalog="System" colorSpace="catalog"/>
+                        <color key="backgroundColor" name="controlColor" catalog="System" colorSpace="catalog"/>
+                    </textFieldCell>
+                </textField>
+                <textField hidden="YES" horizontalHuggingPriority="251" verticalHuggingPriority="750" misplaced="YES" id="CJu-FZ-K1D">
+                    <rect key="frame" x="157" y="111" width="23" height="17"/>
+                    <autoresizingMask key="autoresizingMask" flexibleMaxX="YES" flexibleMinY="YES"/>
+                    <textFieldCell key="cell" controlSize="small" scrollable="YES" lineBreakMode="clipping" sendsActionOnEndEditing="YES" title="⚠️" id="zNa-1V-sCK">
+                        <font key="font" metaFont="smallSystem"/>
+                        <color key="textColor" name="labelColor" catalog="System" colorSpace="catalog"/>
+                        <color key="backgroundColor" name="controlColor" catalog="System" colorSpace="catalog"/>
+                    </textFieldCell>
+                </textField>
             </subviews>
+            <point key="canvasLocation" x="-39.5" y="234.5"/>
         </customView>
         <customView misplaced="YES" id="G2G-W6-kWa" userLabel="Prefs - Profiles - Text" customClass="iTermSizeRememberingView">
             <rect key="frame" x="0.0" y="0.0" width="559" height="411"/>
@@ -2685,10 +2706,10 @@ DQ
                     </connections>
                 </button>
                 <button misplaced="YES" id="jlZ-SF-XtE">
-                    <rect key="frame" x="324" y="234" width="207" height="18"/>
+                    <rect key="frame" x="324" y="234" width="203" height="18"/>
                     <autoresizingMask key="autoresizingMask" flexibleMaxX="YES" flexibleMinY="YES"/>
                     <string key="toolTip">Apps (such as your shell or your editor) expect each character to have a particular “width,” between 0 and 2 cells. If the app and the terminal emulator have different width tables, rendering problems ensue. Notably, Unicode 8 defines most Emoji to be 1 cell wide. Most fonts render them as two cells wide. Unicode 9 fixes this. If your apps have been updated for Unicode 9, you should enable this.</string>
-                    <buttonCell key="cell" type="check" title="Use Unicode Version 9 Widths" bezelStyle="regularSquare" imagePosition="left" alignment="left" inset="2" id="usB-uD-pmw">
+                    <buttonCell key="cell" type="check" title="Use Unicode version 9 widths" bezelStyle="regularSquare" imagePosition="left" alignment="left" inset="2" id="usB-uD-pmw">
                         <behavior key="behavior" changeContents="YES" doesNotDimImage="YES" lightByContents="YES"/>
                         <font key="font" metaFont="system"/>
                     </buttonCell>
@@ -3370,7 +3391,6 @@ DQ
                 <button misplaced="YES" id="Wi4-0H-Bb4">
                     <rect key="frame" x="21" y="18" width="162" height="18"/>
                     <autoresizingMask key="autoresizingMask" flexibleMaxX="YES" flexibleMinY="YES"/>
-                    <string key="toolTip">If Shell Integration is enabled, this prevents command prompts from starting in the middle of a line when the previous command did not end with a newline.</string>
                     <buttonCell key="cell" type="check" title="Show mark indicators" bezelStyle="regularSquare" imagePosition="left" alignment="left" state="on" inset="2" id="uCi-Qa-X8t">
                         <behavior key="behavior" changeContents="YES" doesNotDimImage="YES" lightByContents="YES"/>
                         <font key="font" metaFont="system"/>
@@ -3449,7 +3469,7 @@ DQ
                     <autoresizingMask key="autoresizingMask" flexibleMaxX="YES" flexibleMinY="YES"/>
                     <clipView key="contentView" id="ArV-0K-qze">
                         <rect key="frame" x="1" y="1" width="511" height="95"/>
-                        <autoresizingMask key="autoresizingMask" widthSizable="YES" heightSizable="YES"/>
+                        <autoresizingMask key="autoresizingMask"/>
                         <subviews>
                             <tableView verticalHuggingPriority="750" allowsExpansionToolTips="YES" columnAutoresizingStyle="lastColumnOnly" alternatingRowBackgroundColors="YES" columnReordering="NO" columnResizing="NO" multipleSelection="NO" autosaveColumns="NO" id="5661">
                                 <rect key="frame" x="0.0" y="0.0" width="511" height="95"/>
@@ -3458,7 +3478,7 @@ DQ
                                 <color key="backgroundColor" name="controlBackgroundColor" catalog="System" colorSpace="catalog"/>
                                 <color key="gridColor" name="gridColor" catalog="System" colorSpace="catalog"/>
                                 <tableColumns>
-                                    <tableColumn width="508" minWidth="40" maxWidth="1000" id="5664">
+                                    <tableColumn identifier="" width="508" minWidth="40" maxWidth="1000" id="5664">
                                         <tableHeaderCell key="headerCell" lineBreakMode="truncatingTail" borderStyle="border" alignment="left">
                                             <font key="font" metaFont="smallSystem"/>
                                             <color key="textColor" name="headerTextColor" catalog="System" colorSpace="catalog"/>
@@ -4058,7 +4078,7 @@ DQ
                                 <color key="backgroundColor" name="controlBackgroundColor" catalog="System" colorSpace="catalog"/>
                                 <color key="gridColor" name="gridColor" catalog="System" colorSpace="catalog"/>
                                 <tableColumns>
-                                    <tableColumn width="516" minWidth="40" maxWidth="1000" id="7MV-bw-rSc">
+                                    <tableColumn identifier="" width="516" minWidth="40" maxWidth="1000" id="7MV-bw-rSc">
                                         <tableHeaderCell key="headerCell" lineBreakMode="truncatingTail" borderStyle="border" alignment="left">
                                             <font key="font" metaFont="smallSystem"/>
                                             <color key="textColor" name="headerTextColor" catalog="System" colorSpace="catalog"/>
@@ -4375,9 +4395,9 @@ DQ
                     </connections>
                 </button>
                 <button id="5049">
-                    <rect key="frame" x="18" y="107" width="229" height="18"/>
+                    <rect key="frame" x="18" y="107" width="286" height="18"/>
                     <autoresizingMask key="autoresizingMask" flexibleMaxX="YES" flexibleMinY="YES"/>
-                    <buttonCell key="cell" type="check" title="Prompt for test-release updates" bezelStyle="regularSquare" imagePosition="left" alignment="left" inset="2" id="5065">
+                    <buttonCell key="cell" type="check" title="Update to beta test versions when available" bezelStyle="regularSquare" imagePosition="left" alignment="left" inset="2" id="5065">
                         <behavior key="behavior" changeContents="YES" doesNotDimImage="YES" lightByContents="YES"/>
                         <font key="font" metaFont="system"/>
                     </buttonCell>
@@ -5443,7 +5463,7 @@ DQ
                                 <color key="backgroundColor" name="controlBackgroundColor" catalog="System" colorSpace="catalog"/>
                                 <color key="gridColor" name="gridColor" catalog="System" colorSpace="catalog"/>
                                 <tableColumns>
-                                    <tableColumn editable="NO" width="47" minWidth="40" maxWidth="1000" id="5564">
+                                    <tableColumn identifier="" editable="NO" width="47" minWidth="40" maxWidth="1000" id="5564">
                                         <tableHeaderCell key="headerCell" lineBreakMode="truncatingTail" borderStyle="border" alignment="left" title="Default">
                                             <font key="font" metaFont="smallSystem"/>
                                             <color key="textColor" name="headerTextColor" catalog="System" colorSpace="catalog"/>
@@ -5456,7 +5476,7 @@ DQ
                                         </textFieldCell>
                                         <tableColumnResizingMask key="resizingMask" resizeWithTable="YES"/>
                                     </tableColumn>
-                                    <tableColumn editable="NO" width="185" minWidth="40" maxWidth="1000" id="5565">
+                                    <tableColumn identifier="" editable="NO" width="185" minWidth="40" maxWidth="1000" id="5565">
                                         <tableHeaderCell key="headerCell" lineBreakMode="truncatingTail" borderStyle="border" alignment="left" title="Name">
                                             <font key="font" metaFont="smallSystem"/>
                                             <color key="textColor" name="headerTextColor" catalog="System" colorSpace="catalog"/>
@@ -5555,7 +5575,7 @@ DQ
                                 <color key="backgroundColor" name="controlBackgroundColor" catalog="System" colorSpace="catalog"/>
                                 <color key="gridColor" name="gridColor" catalog="System" colorSpace="catalog"/>
                                 <tableColumns>
-                                    <tableColumn width="284" minWidth="40" maxWidth="1000" id="6095">
+                                    <tableColumn identifier="" width="284" minWidth="40" maxWidth="1000" id="6095">
                                         <tableHeaderCell key="headerCell" lineBreakMode="truncatingTail" borderStyle="border" alignment="left" title="Mouse Button/Trackpad Gesture">
                                             <font key="font" metaFont="smallSystem"/>
                                             <color key="textColor" name="headerTextColor" catalog="System" colorSpace="catalog"/>
@@ -5568,7 +5588,7 @@ DQ
                                         </textFieldCell>
                                         <tableColumnResizingMask key="resizingMask" resizeWithTable="YES" userResizable="YES"/>
                                     </tableColumn>
-                                    <tableColumn width="559" minWidth="10" maxWidth="3.4028234663852886e+38" id="6099">
+                                    <tableColumn identifier="" width="559" minWidth="10" maxWidth="3.4028234663852886e+38" id="6099">
                                         <tableHeaderCell key="headerCell" lineBreakMode="truncatingTail" borderStyle="border" alignment="left" title="Action">
                                             <font key="font" metaFont="smallSystem"/>
                                             <color key="textColor" name="headerTextColor" catalog="System" colorSpace="catalog"/>
@@ -5741,7 +5761,7 @@ DQ
                                 <color key="backgroundColor" name="_sourceListBackgroundColor" catalog="System" colorSpace="catalog"/>
                                 <color key="gridColor" name="gridColor" catalog="System" colorSpace="catalog"/>
                                 <tableColumns>
-                                    <tableColumn editable="NO" width="595" minWidth="40" maxWidth="1000" id="wQ6-7Q-vbc">
+                                    <tableColumn identifier="" editable="NO" width="595" minWidth="40" maxWidth="1000" id="wQ6-7Q-vbc">
                                         <tableHeaderCell key="headerCell" lineBreakMode="truncatingTail" borderStyle="border" alignment="left" title="Setting">
                                             <font key="font" metaFont="smallSystem"/>
                                             <color key="textColor" name="headerTextColor" catalog="System" colorSpace="catalog"/>
@@ -5754,7 +5774,7 @@ DQ
                                         </textFieldCell>
                                         <tableColumnResizingMask key="resizingMask" resizeWithTable="YES"/>
                                     </tableColumn>
-                                    <tableColumn width="349" minWidth="40" maxWidth="1000" id="FSW-rl-pkB">
+                                    <tableColumn identifier="" width="349" minWidth="40" maxWidth="1000" id="FSW-rl-pkB">
                                         <tableHeaderCell key="headerCell" lineBreakMode="truncatingTail" borderStyle="border" alignment="left" title="Value">
                                             <font key="font" metaFont="smallSystem"/>
                                             <color key="textColor" name="headerTextColor" catalog="System" colorSpace="catalog"/>

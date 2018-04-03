@@ -66,14 +66,23 @@ const CGFloat kDefaultTagsWidth = 80;
     NSSplitView *splitView_;
     CGFloat lastTagsWidth_;
     NSMutableDictionary<NSNumber *, NSNumber *> *_savedHeights;
+
+    // Cached row height info
+    BOOL _haveHeights;
+    CGFloat _heightWithTags;
+    CGFloat _heightWithoutTags;
 }
 
 - (instancetype)initWithFrame:(NSRect)frameRect {
     return [self initWithFrame:frameRect model:[ProfileModel sharedInstance]];
 }
 
-// This is the designated initializer.
+
 - (instancetype)initWithFrame:(NSRect)frameRect model:(ProfileModel*)dataSource {
+    return [self initWithFrame:frameRect model:dataSource font:nil];
+}
+
+- (instancetype)initWithFrame:(NSRect)frameRect model:(ProfileModel *)dataSource font:(NSFont *)font {
     self = [super initWithFrame:frameRect];
     if (self) {
         _savedHeights = [[NSMutableDictionary alloc] init];
@@ -148,8 +157,6 @@ const CGFloat kDefaultTagsWidth = 80;
         [scrollView_ setDocumentView:tableView_];
         [scrollView_ setBorderType:NSBezelBorder];
 
-        [tableView_ setDelegate:self];
-        [tableView_ setDataSource:self];
         selectedGuids_ = [[NSMutableSet alloc] init];
 
         [tableView_ setDoubleAction:@selector(onDoubleClick:)];
@@ -179,6 +186,12 @@ const CGFloat kDefaultTagsWidth = 80;
         tagsView_.delegate = self;
         [splitView_ addSubview:tagsView_];
         [splitView_ addSubview:scrollView_];
+
+        if (font) {
+            [self setFont:font];
+        }
+        [tableView_ setDataSource:self];
+        [tableView_ setDelegate:self];
     }
     return self;
 }
@@ -474,18 +487,38 @@ const CGFloat kDefaultTagsWidth = 80;
     [self reloadData];
 }
 
-- (CGFloat)tableView:(NSTableView *)tableView heightOfRow:(NSInteger)rowIndex {
-    NSAttributedString *attributedString = [self tableView:tableView objectValueForTableColumn:tableColumn_ row:rowIndex];
-    // tableview is a mess. Add some points so it works. Who knows why.
-    CGFloat height = [attributedString heightForWidth:tableColumn_.width] + [self extraHeight];
+- (CGFloat)heightOfRowWithTags:(BOOL)hasTags {
+    if (!_haveHeights) {
+        _heightWithTags = [[self attributedStringForName:@"M"
+                                                    tags:@[ @"M" ]
+                                                selected:NO
+                                               isDefault:YES
+                                                  filter:nil] heightForWidth:100] + [self extraHeightWithTags:YES];
+        _heightWithoutTags = [[self attributedStringForName:@"M"
+                                                       tags:nil
+                                                   selected:NO
+                                                  isDefault:YES
+                                                     filter:nil] heightForWidth:100] + [self extraHeightWithTags:NO];
+        _haveHeights = YES;
+    }
+    return hasTags ? _heightWithTags : _heightWithoutTags;
+}
 
+- (CGFloat)tableView:(NSTableView *)tableView heightOfRow:(NSInteger)rowIndex {
+    Profile *profile = [dataSource_ profileAtIndex:rowIndex];
+    const BOOL hasTags = ([profile[KEY_TAGS] count] > 0);
+    CGFloat height = [self heightOfRowWithTags:hasTags];
     _savedHeights[@(rowIndex)] = @(height);
     return height;
 }
 
-- (CGFloat)extraHeight {
+- (CGFloat)extraHeightWithTags:(BOOL)hasTags {
     if (self.mainFont.pointSize <= [NSFont smallSystemFontSize]) {
-        return 1;
+        if (hasTags) {
+            return 2;
+        } else {
+            return 1;
+        }
     } else {
         return 2;
     }
@@ -595,7 +628,7 @@ const CGFloat kDefaultTagsWidth = 80;
         DLog(@"Getting name of profile at row %d. The dictionary's address is %p. Its name is %@",
              (int)rowIndex, bookmark, bookmark[KEY_NAME]);
         Profile *defaultProfile = [[ProfileModel sharedInstance] defaultBookmark];
-        return [self attributedStringForName:bookmark[KEY_NAME]
+        return [self attributedStringForName:bookmark[KEY_NAME] ?: @""
                                         tags:bookmark[KEY_TAGS]
                                     selected:[[tableView_ selectedRowIndexes] containsIndex:rowIndex]
                                    isDefault:[bookmark[KEY_GUID] isEqualToString:defaultProfile[KEY_GUID]]
@@ -891,16 +924,18 @@ const CGFloat kDefaultTagsWidth = 80;
                                        frame.size.height - kSearchWidgetHeight - margin_);
     splitView_.frame = splitViewFrame;
 
-    NSMutableIndexSet *rowsWithHeightChange = [NSMutableIndexSet indexSet];
-    for (NSInteger i = 0; i < self.numberOfRows; i++) {
-        CGFloat savedHeight = [_savedHeights[@(i)] doubleValue];
-        CGFloat height = [self tableView:tableView_ heightOfRow:i];
-        if (round(height) != round(savedHeight)) {
-            [rowsWithHeightChange addIndex:i];
+    if (tableView_.delegate) {
+        NSMutableIndexSet *rowsWithHeightChange = [NSMutableIndexSet indexSet];
+        for (NSInteger i = 0; i < self.numberOfRows; i++) {
+            CGFloat savedHeight = [_savedHeights[@(i)] doubleValue];
+            CGFloat height = [self tableView:tableView_ heightOfRow:i];
+            if (round(height) != round(savedHeight)) {
+                [rowsWithHeightChange addIndex:i];
+            }
         }
-    }
-    if (rowsWithHeightChange.count > 0) {
-        [tableView_ noteHeightOfRowsWithIndexesChanged:rowsWithHeightChange];
+        if (rowsWithHeightChange.count > 0) {
+            [tableView_ noteHeightOfRowsWithIndexesChanged:rowsWithHeightChange];
+        }
     }
 }
 
@@ -917,6 +952,7 @@ const CGFloat kDefaultTagsWidth = 80;
 
 - (void)setFont:(NSFont *)theFont
 {
+    _haveHeights = NO;
     for (NSTableColumn *col in [tableView_ tableColumns]) {
         [[col dataCell] setFont:theFont];
     }

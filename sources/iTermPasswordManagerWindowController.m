@@ -37,6 +37,7 @@ static BOOL sAuthenticated;
     NSArray *_accounts;
     NSString *_passwordBeingShown;
     NSInteger _rowForPasswordBeingShown;
+    NSString *_accountNameToSelectAfterAuthentication;
 }
 
 + (NSArray *)accountNamesWithFilter:(NSString *)filter {
@@ -153,6 +154,7 @@ static BOOL sAuthenticated;
 
 - (void)dealloc {
     [_accounts release];
+    [_accountNameToSelectAfterAuthentication release];
     [[NSNotificationCenter defaultCenter] removeObserver:self];
     [super dealloc];
 }
@@ -190,6 +192,9 @@ static BOOL sAuthenticated;
     if (index != NSNotFound) {
         [_tableView selectRowIndexes:[NSIndexSet indexSetWithIndex:index]
                 byExtendingSelection:NO];
+    } else if (!sAuthenticated) {
+        [_accountNameToSelectAfterAuthentication autorelease];
+        _accountNameToSelectAfterAuthentication = [name copy];
     }
 }
 
@@ -231,6 +236,7 @@ static BOOL sAuthenticated;
     if (sAuthenticated) {
         NSInteger selectedRow = [_tableView selectedRow];
         NSString *selectedAccountName = [self accountNameForRow:selectedRow];
+        [_tableView reloadData];
         [[self keychain] deletePasswordForService:kServiceName account:selectedAccountName];
         [self reloadAccounts];
         [self passwordsDidChange];
@@ -303,13 +309,8 @@ static BOOL sAuthenticated;
         LAContext *myContext = [[[LAContext alloc] init] autorelease];
         NSString *reason = nil;
         if (![self tryToAuthenticateWithPolicy:LAPolicyDeviceOwnerAuthentication context:myContext reason:&reason]) {
-            DLog(@"There are no auth policies that can succeed on this machine. Giving up.");
-
-            NSAlert *alert = [[[NSAlert alloc] init] autorelease];
-            alert.messageText = @"Authentication Failed";
-            alert.informativeText = [NSString stringWithFormat:@"Device owner auth not available: %@", reason];
-            [alert addButtonWithTitle:@"OK"];
-            [alert runModal];
+            DLog(@"There are no auth policies that can succeed on this machine. Giving up. %@", reason);
+            sAuthenticated = YES;
         }
     }
 }
@@ -356,7 +357,13 @@ static BOOL sAuthenticated;
 
         if (success) {
             [self reloadAccounts];
-            [[self window] makeFirstResponder:_searchField];
+            if (_accountNameToSelectAfterAuthentication) {
+                [self selectAccountName:_accountNameToSelectAfterAuthentication];
+                [_accountNameToSelectAfterAuthentication release];
+                _accountNameToSelectAfterAuthentication = nil;
+            } else {
+                [[self window] makeFirstResponder:_searchField];
+            }
         } else {
             [self closeOrEndSheet];
         }
@@ -462,6 +469,9 @@ objectValueForTableColumn:(NSTableColumn *)aTableColumn
               row:(NSInteger)rowIndex {
     if (!sAuthenticated) {
         return;
+    }
+    if (rowIndex < 0 || rowIndex >= _accounts.count) {
+        ITCriticalError(NO, @"Row index %@ out of bounds [0, %@)", @(rowIndex), @(_accounts.count));
     }
     NSString *accountName = [self accountNameForRow:rowIndex];
     if (aTableColumn == _accountNameColumn) {

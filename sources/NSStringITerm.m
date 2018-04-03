@@ -606,11 +606,11 @@ int decode_utf8_char(const unsigned char *datap,
     } else if (charsTakenFromPrefixPtr) {
         *charsTakenFromPrefixPtr = offset;
     }
-    
+
     if (lastBadCharRange.location != NSNotFound) {
         end = lastBadCharRange.location;
     }
-    
+
     return [self substringWithRange:NSMakeRange(start, end - start)];
 }
 
@@ -713,7 +713,7 @@ int decode_utf8_char(const unsigned char *datap,
             }
         }
     } while (found);
-    
+
     return s;
 }
 
@@ -1011,21 +1011,21 @@ int decode_utf8_char(const unsigned char *datap,
     float fontSize;
     char utf8FontName[128];
     NSFont *aFont;
-    
+
     if ([self length] == 0) {
         return ([NSFont userFixedPitchFontOfSize:0.0]);
     }
-    
+
     sscanf([self UTF8String], "%127s %g", utf8FontName, &fontSize);
     // The sscanf man page is unclear whether it will always null terminate when the length hits the
     // maximum field width, so ensure it is null terminated.
     utf8FontName[127] = '\0';
-    
+
     aFont = [NSFont fontWithName:[NSString stringWithFormat:@"%s", utf8FontName] size:fontSize];
     if (aFont == nil) {
         return ([NSFont userFixedPitchFontOfSize:0.0]);
     }
-    
+
     return aFont;
 }
 
@@ -1077,7 +1077,7 @@ static TECObjectRef CreateTECConverterForUTF8Variants(TextEncodingVariant varian
         gHFSPlusComposed = CreateTECConverterForUTF8Variants(kUnicodeHFSPlusCompVariant);
         gHFSPlusDecomposed = CreateTECConverterForUTF8Variants(kUnicodeHFSPlusDecompVariant);
     });
-    
+
     size_t in_len = sizeof(unichar) * [self length];
     size_t out_len;
     unichar *in = malloc(in_len);
@@ -1097,7 +1097,7 @@ static TECObjectRef CreateTECConverterForUTF8Variants(TextEncodingVariant varian
         free(in);
         return self;
     }
-    
+
     if (TECConvertText(precompose ? gHFSPlusComposed : gHFSPlusDecomposed,
                        (TextPtr)in,
                        in_len,
@@ -1110,7 +1110,7 @@ static TECObjectRef CreateTECConverterForUTF8Variants(TextEncodingVariant varian
         int numCharsOut = out_len / sizeof(unichar);
         ret = [NSString stringWithCharacters:out length:numCharsOut];
     }
-    
+
     free(in);
     free(out);
 
@@ -1146,13 +1146,13 @@ static TECObjectRef CreateTECConverterForUTF8Variants(TextEncodingVariant varian
     if (self.length == 0 || self.length == 3 || self.length > 4) {
         return @"";
     }
-    
+
     unsigned int value;
     NSScanner *scanner = [NSScanner scannerWithString:self];
     if (![scanner scanHexInt:&value]) {
         return @"";
     }
-    
+
     unichar c = value;
     return [NSString stringWithCharacters:&c length:1];
 }
@@ -1207,7 +1207,7 @@ static TECObjectRef CreateTECConverterForUTF8Variants(TextEncodingVariant varian
            @"^(\")": @(kSpecialCharacterDoubleQuote),
            @"^(<C-([A-Za-z])>)": @(kSpecialCharacterControlKey),
            @"^(<M-([A-Za-z])>)": @(kSpecialCharacterMetaKey) };
-           
+
 
     NSMutableString *result = [NSMutableString string];
     __block int haveAppendedUpToIndex = 0;
@@ -1233,49 +1233,49 @@ static TECObjectRef CreateTECConverterForUTF8Variants(TextEncodingVariant varian
                     case kSpecialCharacterOneDigitOctal:
                         [result appendString:[capture[2] octalCharacter]];
                         break;
-                        
+
                     case kSpecialCharacterFourDigitUnicode:
                     case kSpecialCharacterTwoDigitHex:
                     case kSpecialCharacterOneDigitHex:
                         [result appendString:[capture[2] hexCharacter]];
                         break;
-                        
+
                     case kSpecialCharacterBackspace:
                         [result appendFormat:@"%c", 0x7f];
                         break;
-                        
+
                     case kSpecialCharacterEscape:
                         [result appendFormat:@"%c", 27];
                         break;
-                        
+
                     case kSpecialCharacterFormFeed:
                         [result appendFormat:@"%c", 12];
                         break;
-                        
+
                     case kSpecialCharacterNewline:
                         [result appendString:@"\n"];
                         break;
-                        
+
                     case kSpecialCharacterReturn:
                         [result appendString:@"\r"];
                         break;
-                        
+
                     case kSpecialCharacterTab:
                         [result appendString:@"\t"];
                         break;
-                        
+
                     case kSpecialCharacterBackslash:
                         [result appendString:@"\\"];
                         break;
-                        
+
                     case kSpecialCharacterDoubleQuote:
                         [result appendString:@"\""];
                         break;
-                        
+
                     case kSpecialCharacterControlKey:
                         [result appendString:[capture[2] controlCharacter]];
                         break;
-                        
+
                     case kSpecialCharacterMetaKey:
                         [result appendString:[capture[2] metaCharacter]];
                         break;
@@ -1289,7 +1289,7 @@ static TECObjectRef CreateTECConverterForUTF8Variants(TextEncodingVariant varian
         }
         index = [self indexOfSubstring:@"\\" fromIndex:index];
     }  // while searching for backslashes
-    
+
     index = self.length;
     [result appendString:[self substringWithRange:NSMakeRange(haveAppendedUpToIndex,
                                                               index - haveAppendedUpToIndex)]];
@@ -1507,12 +1507,40 @@ static TECObjectRef CreateTECConverterForUTF8Variants(TextEncodingVariant varian
     if (self.length == 0) {
         return;
     }
+    static dispatch_once_t onceToken;
+    static NSCharacterSet *exceptions;
+    dispatch_once(&onceToken, ^{
+        // These characters are forced to be base characters.
+        exceptions = [[NSCharacterSet characterSetWithCharactersInString:@"\uff9e\uff9f"] retain];
+    });
     CFIndex index = 0;
+    NSInteger minimumLocation = 0;
     NSRange range;
     do {
         CFRange tempRange = CFStringGetRangeOfComposedCharactersAtIndex((CFStringRef)self, index);
+        if (tempRange.location < minimumLocation) {
+            NSInteger diff = minimumLocation - tempRange.location;
+            tempRange.location += diff;
+            if (diff > tempRange.length) {
+                tempRange.length = 0;
+            } else {
+                tempRange.length -= diff;
+            }
+        }
         range = NSMakeRange(tempRange.location, tempRange.length);
         if (range.length > 0) {
+            // CFStringGetRangeOfComposedCharactersAtIndex thinks that U+FF9E and U+FF9F are
+            // combining marks. Terminal.app and the person in issue 6048 disagree. Prevent them
+            // from combining.
+            NSRange rangeOfFirstException = [self rangeOfCharacterFromSet:exceptions
+                                                                  options:NSLiteralSearch
+                                                                    range:range];
+            if (rangeOfFirstException.location != NSNotFound &&
+                rangeOfFirstException.location > range.location) {
+                range.length = rangeOfFirstException.location - range.location;
+                minimumLocation = NSMaxRange(range);
+            }
+
             unichar simple = range.length == 1 ? [self characterAtIndex:range.location] : 0;
             NSString *complexString = range.length == 1 ? nil : [self substringWithRange:range];
             BOOL stop = NO;
@@ -1585,7 +1613,7 @@ static TECObjectRef CreateTECConverterForUTF8Variants(TextEncodingVariant varian
 // http://www.cse.yorku.ca/~oz/hash.html
 - (NSUInteger)hashWithDJB2 {
     NSUInteger hash = 5381;
-    
+
     for (NSUInteger i = 0; i < self.length; i++) {
         unichar c = [self characterAtIndex:i];
         hash = (hash * 33) ^ c;
@@ -1722,6 +1750,91 @@ static TECObjectRef CreateTECConverterForUTF8Variants(TextEncodingVariant varian
         }
     }
     return temp;
+}
+
+- (NSRect)it_boundingRectWithSize:(NSSize)bounds attributes:(NSDictionary *)attributes truncated:(BOOL *)truncated {
+    CGSize size = { 0, 0 };
+    *truncated = NO;
+    for (NSString *part in [self componentsSeparatedByString:@"\n"]) {
+        CFMutableAttributedStringRef string =
+            (CFMutableAttributedStringRef)[[[NSAttributedString alloc] initWithString:part
+                                                                           attributes:attributes] autorelease];
+
+        CTFramesetterRef framesetter = CTFramesetterCreateWithAttributedString(string);
+        CFRange fitRange;
+
+        CFRange textRange = CFRangeMake(0, part.length);
+        CGSize frameSize = CTFramesetterSuggestFrameSizeWithConstraints(framesetter,
+                                                                        textRange,
+                                                                        NULL,
+                                                                        bounds,
+                                                                        &fitRange);
+        if (fitRange.length != part.length) {
+            *truncated = YES;
+        }
+        CFRelease(framesetter);
+        size.width = MAX(size.width, frameSize.width);
+        size.height += frameSize.height;
+    }
+
+    return NSMakeRect(0, 0, size.width, size.height);
+}
+
+- (void)it_drawInRect:(CGRect)rect attributes:(NSDictionary *)attributes {
+    CGContextRef ctx = [[NSGraphicsContext currentContext] graphicsPort];
+    CGContextSaveGState(ctx);
+
+    for (NSString *part in [self componentsSeparatedByString:@"\n"]) {
+        CFMutableAttributedStringRef string =
+                (CFMutableAttributedStringRef)[[[NSAttributedString alloc] initWithString:part
+                                                                               attributes:attributes] autorelease];
+
+        CTFramesetterRef framesetter = CTFramesetterCreateWithAttributedString(string);
+
+        CGMutablePathRef path = CGPathCreateMutable();
+        CGPathAddRect(path, NULL, rect);
+
+        CTFrameRef textFrame = CTFramesetterCreateFrame(framesetter, CFRangeMake(0,0), path, NULL);
+
+        CTFrameDraw(textFrame, ctx);
+
+        CFRange fitRange;
+
+        // Get the height of the line and translate the context down by it
+        CFRange textRange = CFRangeMake(0, part.length);
+        CGSize frameSize = CTFramesetterSuggestFrameSizeWithConstraints(framesetter,
+                                                                        textRange,
+                                                                        NULL,
+                                                                        rect.size,
+                                                                        &fitRange);
+        CGContextTranslateCTM(ctx, 0, -frameSize.height);
+
+
+        CGPathRelease(path);
+        CFRelease(framesetter);
+
+    }
+
+    CGContextRestoreGState(ctx);
+}
+
+- (BOOL)startsWithEmoji {
+    static dispatch_once_t onceToken;
+    static NSMutableCharacterSet *emojiSet;
+    dispatch_once(&onceToken, ^{
+        emojiSet = [[NSMutableCharacterSet alloc] init];
+        void (^addRange)(NSUInteger, NSUInteger) = ^(NSUInteger first, NSUInteger last){
+            [emojiSet addCharactersInRange:NSMakeRange(first, last - first + 1)];
+        };
+        addRange(0x1F600, 0x1F64F);  // Emoticons
+        addRange(0x1F300, 0x1F5FF);  // Misc Symbols and Pictographs
+        addRange(0x1F680, 0x1F6FF);  // Transport and Map
+        addRange(0x2600, 0x26FF);    // Misc symbols
+        addRange(0x2700, 0x27BF);    // Dingbats
+        addRange(0xFE00, 0xFE0F);    // Variation Selectors
+        addRange(0x1F900, 0x1F9FF);  // Supplemental Symbols and Pictographs
+    });
+    return [emojiSet longCharacterIsMember:[self firstCharacter]];
 }
 
 @end

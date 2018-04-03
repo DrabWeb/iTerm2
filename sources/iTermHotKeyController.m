@@ -194,7 +194,10 @@ NSString *const TERMINAL_ARRANGEMENT_PROFILE_GUID = @"Hotkey Profile GUID";
     BOOL anyWindowRollingOut = [[self profileHotKeys] anyWithBlock:^BOOL(iTermProfileHotKey *anObject) {
         return [anObject rollingOut];
     }];
-    if (!anyWindowRollingOut) {
+    BOOL anyWindowRollingIn = [[self profileHotKeys] anyWithBlock:^BOOL(iTermProfileHotKey *anObject) {
+        return [anObject rollingIn];
+    }];
+    if (!anyWindowRollingOut && !anyWindowRollingIn) {
         // If there is previous state:
         // Going from hotkey window to non-hotkey window. Forget the previous state because
         // there's no need to ever return to it now. This happens when navigating explicitly from
@@ -202,7 +205,7 @@ NSString *const TERMINAL_ARRANGEMENT_PROFILE_GUID = @"Hotkey Profile GUID";
         DLog(@"A non-hotkey window became key. Removing previous state %p", self.previousState);
         self.previousState = nil;
     }
-    
+
     // Clear the `wasAutoHidden` flag if the auto-hide was not due to the application resigning
     // active state. We can detect this because the only other way a window would auto-hide is if
     // another window becomes key.
@@ -221,7 +224,7 @@ NSString *const TERMINAL_ARRANGEMENT_PROFILE_GUID = @"Hotkey Profile GUID";
     DLog(@"** Begin considering autohiding these windows:");
     DLog(@"%@", windowControllersToConsiderHiding);
     DLog(@"From:\n%@", [NSThread callStackSymbols]);
-    
+
     if (![self shouldAutoHide]) {
         DLog(@"shouldAutoHide returned NO");
         return;
@@ -275,7 +278,7 @@ NSString *const TERMINAL_ARRANGEMENT_PROFILE_GUID = @"Hotkey Profile GUID";
                 [result addObject:[iTermHotKeyDescriptor descriptorWithKeyCode:keyCode
                                                                      modifiers:modifiers]];
             }
-            
+
             if ([iTermProfilePreferences boolForKey:KEY_HOTKEY_ACTIVATE_WITH_MODIFIER inProfile:profileHotKey.profile]) {
                 iTermHotKeyModifierActivation modifierActivation =
                     [iTermProfilePreferences unsignedIntegerForKey:KEY_HOTKEY_MODIFIER_ACTIVATION
@@ -463,7 +466,7 @@ NSString *const TERMINAL_ARRANGEMENT_PROFILE_GUID = @"Hotkey Profile GUID";
         DLog(@"The key window's controller does not auto-hide the hotkey window: %@", keyWindow);
         return NO;
     }
-    
+
     // Don't hide when a panel becomes key
     if ([keyWindow isKindOfClass:[NSPanel class]]) {
         DLog(@"A panel %@ just became key", keyWindow);
@@ -493,7 +496,7 @@ NSString *const TERMINAL_ARRANGEMENT_PROFILE_GUID = @"Hotkey Profile GUID";
         DLog(@"The frontmost application is whitelisted");
         return NO;
     }
-    
+
     NSArray<iTermTerminalWindow *> *keyTerminalWindows = [[iTermController sharedInstance] keyTerminalWindows];
     NSArray<PseudoTerminal *> *hotKeyWindowControllers = self.hotKeyWindowControllers;
     BOOL nonHotkeyTerminalIsKey = [keyTerminalWindows containsObjectBesidesObjectsInArray:hotKeyWindowControllers];
@@ -556,24 +559,34 @@ NSString *const TERMINAL_ARRANGEMENT_PROFILE_GUID = @"Hotkey Profile GUID";
     DLog(@"Stored previous state");
 }
 
-- (PseudoTerminal *)keyHotkeyWindowController {
-    NSWindowController *windowController = [[NSApp keyWindow] windowController];
-    if ([windowController isKindOfClass:[PseudoTerminal class]]) {
-        PseudoTerminal *term = (PseudoTerminal *)windowController;
-        if ([term isHotKeyWindow]) {
-            if (![[self profileHotKeyForWindowController:term] rollingOut]) {
-                return term;
+- (BOOL)otherHotKeyWindowWillBecomeKeyAfterOrderOut:(iTermProfileHotKey *)profileHotKey {
+    PseudoTerminal *myWindowController = profileHotKey.windowController;
+
+    for (NSWindow *window in [NSApp orderedWindows]) {
+        NSWindowController *windowController = [window windowController];
+        if ([windowController isKindOfClass:[PseudoTerminal class]]) {
+            PseudoTerminal *term = (PseudoTerminal *)windowController;
+            if (term == myWindowController) {
+                continue;
             }
+            if (!term.isHotKeyWindow) {
+                return NO;
+            }
+            iTermProfileHotKey *other = [self profileHotKeyForWindowController:term];
+            if ([other rollingOut]) {
+                continue;
+            }
+            return term.hasBeenKeySinceActivation;
         }
     }
-    return nil;
+    return NO;
 }
 
 - (BOOL)willFinishRollingOutProfileHotKey:(iTermProfileHotKey *)profileHotKey {
     // Restore the previous state (key window or active app) unless we switched
     // to another hotkey window.
     DLog(@"Finished rolling out %p. key window is %@.", profileHotKey.windowController, [[NSApp keyWindow] windowController]);
-    if ([self keyHotkeyWindowController] != profileHotKey.windowController.weaklyReferencedObject) {
+    if (![self otherHotKeyWindowWillBecomeKeyAfterOrderOut:profileHotKey]) {
         DLog(@"Restoring the previous state %p", self.previousState);
         BOOL result = [self.previousState restoreAllowingAppSwitch:!profileHotKey.closedByOtherHotkeyWindowOpening];
         if (!profileHotKey.closedByOtherHotkeyWindowOpening) {

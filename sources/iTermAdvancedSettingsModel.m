@@ -78,6 +78,14 @@ DEFINE_FLOAT(name, theDefault, theDescription) \
                                                             description:theDescription]; \
 }
 
+// Convenience default value for boolean settings that are on for beta users.
+#if BETA
+#define YES_IF_BETA_ELSE_NO YES
+#else
+#define YES_IF_BETA_ELSE_NO NO
+#endif
+
+
 #pragma mark Tabs
 DEFINE_BOOL(useUnevenTabs, NO, @"Tabs: Uneven tab widths allowed.");
 DEFINE_INT(minTabWidth, 75, @"Tabs: Minimum tab width when using uneven tab widths.");
@@ -91,6 +99,7 @@ DEFINE_FLOAT(tabFlashAnimationDuration, 0.25, @"Tabs: Animation duration for fad
 DEFINE_BOOL(allowDragOfTabIntoNewWindow, YES, @"Tabs: Allow a tab to be dragged and dropped outside any existing tab bar to create a new window.");
 DEFINE_INT(minimumTabDragDistance, 10, @"Tabs: How far must the mouse move before a tab drag is initiated?\nYou must restart iTerm2 after changing this setting for it to take effect.");
 DEFINE_BOOL(tabTitlesUseSmartTruncation, YES, @"Tabs: Use “smart truncation” for tab titles.\nIf a tab‘s title is too long to fit, ellipsize the start of the title if more tabs have unique suffixes than prefixes in a given window.");
+DEFINE_BOOL(middleClickClosesTab, YES, @"Tabs: Should middle-click on a tab in the tab bar close the tab?");
 
 #pragma mark Mouse
 DEFINE_STRING(alternateMouseScrollStringForUp, @"",
@@ -106,6 +115,7 @@ DEFINE_BOOL(alwaysAcceptFirstMouse, NO, @"Mouse: Always accept first mouse event
 DEFINE_BOOL(doubleReportScrollWheel, NO, @"Mouse: Double-report scroll wheel events to work around tmux scrolling bug.");
 DEFINE_BOOL(stealKeyFocus, NO, @"Mouse: When Focus Follows Mouse is enabled, steal key focus even when inactive.");
 DEFINE_BOOL(cmdClickWhenInactiveInvokesSemanticHistory, NO, @"Mouse: ⌘-click in an active pane while iTerm2 isn't the active app invokes Semantic History.\nBy default, iTerm2 respects the OS standard that ⌘-click in an app that doesn't have keyboard focus behaves like a non-⌘ click that does not raise the window.");
+DEFINE_BOOL(sensitiveScrollWheel, NO, @"Mouse: Scroll on any scroll wheel movement, no matter how small?");
 
 #pragma mark Terminal
 DEFINE_BOOL(traditionalVisualBell, NO, @"Terminal: Visual bell flashes the whole screen, not just a bell icon.");
@@ -134,13 +144,14 @@ DEFINE_FLOAT(underlineCursorOffset, 0, @"Terminal: Vertical offset for underline
 DEFINE_BOOL(preventEscapeSequenceFromClearingHistory, NO, @"Terminal: Prevent CSI 3 J from clearing scrollback history?\nThis is also known as thethe terminfo E3 capability.");
 DEFINE_FLOAT(verticalBarCursorWidth, 1, @"Terminal: Width of vertical bar cursor.");
 DEFINE_BOOL(acceptOSC7, YES, @"Terminal: Accept OSC 7 to set username, hostname, and path.");
-DEFINE_BOOL(detectPasswordInput, YES, @"Experimental Features: Show key at cursor at password prompt?");
-
+DEFINE_BOOL(detectPasswordInput, YES, @"Terminal: Show key at cursor at password prompt?");
+DEFINE_BOOL(tabsWrapAround, NO, @"Terminal: Tabs wrap around to the next line.\nThis is useful for preserving tabs for later copying to the pasteboard. It breaks backward compatibility and may cause layout problems with programs that don’t expect this behavior.");
 #pragma mark Hotkey
 DEFINE_FLOAT(hotkeyTermAnimationDuration, 0.25, @"Hotkey: Duration in seconds of the hotkey window animation.\nWarning: reducing this value may cause problems if you have multiple displays.");
 DEFINE_BOOL(dockIconTogglesWindow, NO, @"Hotkey: If the only window is a hotkey window, then clicking the dock icon shows or hides it.");
 DEFINE_BOOL(hotkeyWindowFloatsAboveOtherWindows, NO, @"Hotkey: The hotkey window floats above other windows even when another application is active.\nYou must disable “Prefs > Keys > Hotkey window hides when focus is lost” for this setting to be effective.");
 DEFINE_FLOAT(hotKeyDoubleTapMaxDelay, 0.3, @"Hotkey: The maximum amount of time allowed between presses of a modifier key when performing a modifier double-tap.");
+DEFINE_FLOAT(hotKeyDoubleTapMinDelay, 0.01, @"Hotkey: The minimum amount of time required between presses of a modifier key when performing a modifier double-tap.");
 
 #pragma mark General
 DEFINE_STRING(searchCommand, @"https://google.com/search?q=%@", @"General: Template for URL of search engine.\niTerm2 replaces the string “%@” with the text to search for. Query parameter percent escaping is used.");
@@ -159,29 +170,32 @@ DEFINE_BOOL(indicateBellsInDockBadgeLabel, YES, @"General: Indicate the number o
 DEFINE_STRING(downloadsDirectory, @"", @"General: Downloads folder.\nIf set, downloaded files go to this location instead of the user’s $HOME/Downloads folder.");
 DEFINE_FLOAT(pointSizeOfTimeStamp, 10, @"General: Point size for timestamps");
 DEFINE_INT(terminalMargin, 5, @"General: Width of left and right margins in terminal panes\nHow much space to leave between the left and right edges of the terminal.\nYou must restart iTerm2 after modifying this property. Saved window arrangements should be re-created.");
-DEFINE_INT(terminalVMargin, 2, @"General: Height of top and bottom margins in terminal panes\nHow much space to leave between the top and bottom edges of the terminal.\nYou must restart iTerm2 after modifying this property. Saved window arrangements should be re-created.");
+DEFINE_INT(terminalVMargin, 5, @"General: Height of top and bottom margins in terminal panes\nHow much space to leave between the top and bottom edges of the terminal.\nYou must restart iTerm2 after modifying this property. Saved window arrangements should be re-created.");
 DEFINE_BOOL(useVirtualKeyCodesForDetectingDigits, YES, @"General: On keyboards that require a modifier to press a digit, do not require that modifier for switching between windows, tabs, and panes by number.\nFor example, AZERTY requires you to hold down Shift to enter a number. To switch tabs with Cmd+Number on an AZERTY keyboard, you must enable this setting. Then, for example, Cmd-& switches to tab 1. When this setting is enabled, some user-defined shortcuts may become unavailable because the tab/window/pane switching behavior takes precedence.");
 DEFINE_STRING(viewManPageCommand, @"man %@ || sleep 3", @"General: Command to view man pages.\nUsed when you press the man page button on the touch bar. %@ is replaced with the command. End the command with & to avoid opening an iTerm2 window (e.g., if you're launching an external viewer).");
-DEFINE_BOOL(experimentalKeyHandling, YES, @"General: Improved support for input method editors like AquaSKK.");
 DEFINE_BOOL(hideStuckTooltips, YES, @"General: Hide stuck tooltips.\nWhen you hide iTerm2 using a hotkey while a tooltip is fading out it gets stuck because of an OS bug. Work around it with a nasty hack by enabling this feature.")
 DEFINE_BOOL(openFileOverridesSendText, YES, @"General: Should opening a script with iTerm2 disable the default profile's “Send Text at Start” setting?\nIf you use “open iTerm2 file.command” or drag a script onto iTerm2's icon and this setting is enabled then the script will be executed in lieu of the profile's “Send Text at Start” setting. If this setting is off then both will be executed.");
+DEFINE_BOOL(statusBarIcon, YES, @"General: Add status bar icon when excluded from dock?\nWhen you turn on “Exclude from Dock and Cmd-Tab Application Switcher” a status bar icon is added to the menu bar so you can switch the setting back off. Disable this to remove the status bar icon. Doing so makes it very hard to get to Preferences. You must restart iTerm2 after changing this setting.");
+DEFINE_BOOL(wrapFocus, YES, @"General: Should the directional focus hotkeys wrap");
+DEFINE_BOOL(disableGrowl, YES_IF_BETA_ELSE_NO, @"General: Disable Growl notifications.\nSend notifications directly to Notification Center instead of relying on Growl to deliver them. Enables sound alerts on notifications.");
 
 #pragma mark - Drawing
 DEFINE_BOOL(zippyTextDrawing, YES, @"Drawing: Use zippy text drawing algorithm?\nThis draws non-ASCII text more quickly but with lower fidelity. This setting is ignored if ligatures are enabled in Prefs > Profiles > Text.");
 DEFINE_BOOL(lowFiCombiningMarks, NO, @"Drawing: Prefer speed to accuracy for characters with combining marks?");
-DEFINE_BOOL(useAdaptiveFrameRate, YES, @"Drawing: Use adaptive framerate.\nWhen throughput is low, the screen will update at 60 frames per second. When throughput is higher, it will drop to a configurable rate (15 fps by default).");
+DEFINE_BOOL(useAdaptiveFrameRate, YES, @"Drawing: Use adaptive framerate.\nWhen throughput is low, the screen will update at 60 frames per second. When throughput is higher, it will drop to a configurable rate (15 fps by default). Does not apply to Metal renderer.");
 DEFINE_FLOAT(slowFrameRate, 15.0, @"Drawing: When adaptive framerate is enabled, refresh at this rate during high throughput conditions (FPS).");
 DEFINE_INT(adaptiveFrameRateThroughputThreshold, 10000, @"Drawing: Throughput threshold for adaptive frame rate.\nIf more than this many bytes per second are received, use the lower frame rate of 30 fps.");
 DEFINE_BOOL(dwcLineCache, YES, @"Drawing: Enable cache of double-width character locations?\nThis should improve performance. It is always on in nightly builds. You must restart iTerm2 for this setting to take effect.");
 DEFINE_BOOL(useGCDUpdateTimer, YES, @"Drawing: Use GCD-based update timer instead of NSTimer.\nThis should cause more regular screen updates. Restart iTerm2 after changing this setting.");
 DEFINE_BOOL(drawOutlineAroundCursor, NO, @"Drawing: Draw outline around underline and vertical bar cursors using background color.");
+DEFINE_BOOL(disableCustomBoxDrawing, NO, @"Drawing: Use your typeface’s box-drawing characters instead of iTerm2’s custom drawing code.\nYou must restart iTerm2 after changing this setting.");
 
 #pragma mark - Semantic History
 DEFINE_BOOL(ignoreHardNewlinesInURLs, NO, @"Semantic History: Ignore hard newlines for the purposes of locating URLs and file names for Semantic History.\nIf a hard newline occurs at the end of a line then cmd-click will not see it all unless this setting is turned on. This is useful for some interactive applications. Turning this on will remove newlines from the \\3 and \\4 substitutions.");
 // Note: square brackets are included for ipv6 addresses like http://[2600:3c03::f03c:91ff:fe96:6a7a]/
 DEFINE_STRING(URLCharacterSet, @".?\\/:;%=&_-,+~#@!*'(（)）|[]", @"Semantic History: Non-alphanumeric characters considered part of a URL for Semantic History.\nLetters and numbers are always considered part of the URL. These non-alphanumeric characters are used in addition for the purposes of figuring out where a URL begins and ends.");
 DEFINE_INT(maxSemanticHistoryPrefixOrSuffix, 2000, @"Semantic History: Maximum number of bytes of text before and after click location to take into account.\nThis also limits the size of the \\3 and \\4 substitutions.");
-DEFINE_STRING(pathsToIgnore, @"", @"Semantic History: Paths to ignore for Semantic History.\nSeparate paths with a comma. Any file under one of these paths will not be openable with Semantic History.");
+DEFINE_STRING(pathsToIgnore, @"", @"Semantic History: Paths to ignore for Semantic History.\nSeparate paths with a comma. Any file under one of these paths will not be openable with Semantic History. It is wise to add network file systems to this list, since they can be very slow.");
 DEFINE_BOOL(showYellowMarkForJobStoppedBySignal, YES, @"Semantic History: Use a yellow for a Shell Integration prompt mark when the job is stopped by a signal.");
 
 #pragma mark - Debugging
@@ -192,13 +206,13 @@ DEFINE_BOOL(logRestorableStateSize, NO, @"Debugging: Log restorable state size i
 #pragma mark - Session
 DEFINE_BOOL(runJobsInServers, YES, @"Session: Enable session restoration.\nSession restoration runs jobs in separate processes. They will survive crashes, force quits, and upgrades.\nYou must restart iTerm2 for this change to take effect.");
 DEFINE_BOOL(killJobsInServersOnQuit, YES, @"Session: User-initiated Quit (⌘Q) of iTerm2 will kill all running jobs.\nApplies only when session restoration is on.");
-DEFINE_SETTABLE_BOOL(suppressRestartAnnouncement, SuppressRestartAnnouncement, NO, @"Session: Suppress the Restart Session offer.\nWhen a sessions terminates, it will offer to restart itself. Turn this on to suppress the offer permanently.");
+DEFINE_SETTABLE_BOOL(suppressRestartAnnouncement, SuppressRestartAnnouncement, NO, @"Session: Suppress the Restart Session offer.\nWhen a session terminates, it will offer to restart itself. Turn this on to suppress the offer permanently.");
 DEFINE_BOOL(showSessionRestoredBanner, YES, @"Session: When restoring a session without restoring a running job, draw a banner saying “Session Restored” below the restored contents.");
 DEFINE_STRING(autoLogFormat,
               @"\\(session.creationTimeString).\\(session.name).\\(session.termid).\\(iterm2.pid).\\(session.autoLogId).log",
               @"Session: Format for automatic session log filenames.\nSee the Badges documentation for supported substitutions.");
 DEFINE_BOOL(focusNewSplitPaneWithFocusFollowsMouse, YES, @"Session: When focus follows mouse is enabled, should new split panes automatically be focused?");
-
+DEFINE_BOOL(NoSyncSuppressRestartSessionConfirmationAlert, NO, @"Session: Suppress restart session confirmation alert.\nDon't ask for a confirmation when manually restarting a session.");
 
 #pragma mark - Window
 DEFINE_BOOL(openFileInNewWindows, NO, @"Windows: Open files in new windows, not new tabs.\nThis affects shell scripts opened from Finder, for example.");
@@ -233,7 +247,7 @@ DEFINE_BOOL(noSyncSuppressCaptureOutputToolNotVisibleWarning, NO,
             @"Warnings: Suppress warning that the Captured Output tool is not visible.");
 DEFINE_BOOL(closingTmuxWindowKillsTmuxWindows, NO, @"Warnings: Suppress kill/hide dialog when closing a tmux window.");
 DEFINE_BOOL(closingTmuxTabKillsTmuxWindows, NO, @"Warnings: Suppress kill/hide dialog when closing a tmux tab.");
-DEFINE_BOOL(aboutToPasteTabs, NO, @"Warnings: Suppress warning about pasting tabs with offer to convert them to spaces.");
+DEFINE_BOOL(aboutToPasteTabsWithCancel, NO, @"Warnings: Suppress warning about pasting tabs with offer to convert them to spaces.");
 DEFINE_FLOAT(shortLivedSessionDuration, 3, @"Warnings: Warn about short-lived sessions that live less than this many seconds.");
 
 DEFINE_SETTABLE_BOOL(noSyncDoNotWarnBeforeMultilinePaste, NoSyncDoNotWarnBeforeMultilinePaste, NO, @"Warnings: Suppress warning about multi-line pastes (or a single line ending in a newline).\nThis applies whether you are at the shell prompt or not, provided two or more lines are being pasted.");
@@ -251,7 +265,7 @@ DEFINE_FLOAT(quickPasteDelayBetweenCalls, 0.01530456, @"Pasteboard: Delay in sec
 DEFINE_INT(slowPasteBytesPerCall, 16, @"Pasteboard: Number of bytes to paste in each chunk when pasting slowly.");
 DEFINE_FLOAT(slowPasteDelayBetweenCalls, 0.125, @"Pasteboard: Delay in seconds between chunks when pasting slowly");
 DEFINE_BOOL(copyWithStylesByDefault, NO, @"Pasteboard: Copy to pasteboard on selection includes color and font style.");
-DEFINE_INT(pasteHistoryMaxOptions, 20, @"Pasteboard: Number of entires to save in Paste History.\n.");
+DEFINE_INT(pasteHistoryMaxOptions, 20, @"Pasteboard: Number of entries to save in Paste History.\n.");
 DEFINE_BOOL(disallowCopyEmptyString, NO, @"Pasteboard: Disallow copying empty string to pasteboard.\nIf enabled, selecting an empty string (or all whitespace if trimming is enabled) will not erase the contents of the pasteboard.");
 DEFINE_BOOL(typingClearsSelection, YES, @"Pasteboard: Pressing a key will remove the selection.");
 DEFINE_SETTABLE_BOOL(promptForPasteWhenNotAtPrompt, PromptForPasteWhenNotAtPrompt, NO, @"Pasteboard: Warn before pasting when not at shell prompt?");
@@ -275,9 +289,24 @@ DEFINE_INT(badgeTopMargin, 10, @"Badge: Top Margin for the badge\nHow much space
 
 #pragma mark - Experimental Features
 
-// This is half implemented and should not be turned on by default.
-DEFINE_BOOL(useLayers, NO, @"Experimental Features: Use Core Animation layers for opaque terminal views");
 DEFINE_BOOL(enableAPIServer, NO, @"Experimental Features: Enable websocket API server.\nYou must restart iTerm2 for this change to take effect.");
 DEFINE_BOOL(killSessionsOnLogout, NO, @"Experimental Features: Kill sessions on logout.\nA possible fix for issue 4147.");
+
+// This causes problems like issue 6052, where repeats cause the IME to swallow subsequent keypresses.
+DEFINE_BOOL(experimentalKeyHandling, NO, @"General: Improved support for input method editors like AquaSKK.");
+
+DEFINE_BOOL(useExperimentalFontMetrics, NO, @"Experimental Features: Use a more theoretically correct technique to measure line height.\nYou must restart iTerm2 or adjust a session's font size for this change to take effect.");
+DEFINE_BOOL(supportREPCode, YES_IF_BETA_ELSE_NO, @"Experimental Features: Enable support for REP (Repeat previous character) escape sequence?");
+
+DEFINE_BOOL(showBlockBoundaries, NO, @"Debugging: Show line buffer block boundaries (issue 6207)");
+DEFINE_BOOL(useMetal, YES_IF_BETA_ELSE_NO, @"Experimental Features: Use Metal GPU-based renderer.\nThis should provide higher performance but it does not support transparent windows or ligatures and may have other missing features.");
+DEFINE_BOOL(showMetalFPSmeter, NO, @"Experimental Features: Show FPS meter\nRequires Metal renderer");
+DEFINE_BOOL(disableMetalWhenUnplugged, YES, @"Experimental Features: Disable Metal renderer when not connected to power?\nThis helps to conserve energy.");
+
+// TODO: Turn this back on by default in a few days. Let's see if it is responsible for the spike in nightly build crasehs starting with the 3-12-2018 build.
+DEFINE_BOOL(disableMetalWhenIdle, NO, @"Experimental Features: Disable metal renderer when idle to save CPU utilization?\nRequires Metal renderer");
+
+DEFINE_BOOL(proportionalScrollWheelReporting, YES_IF_BETA_ELSE_NO, @"Experimental Features: Report multiple mouse scroll events when scrolling quickly?");
+DEFINE_BOOL(useModernScrollWheelAccumulator, NO, @"Experimental Features: Use modern scroll wheel accumulator.\nThis should support wheel mice better and feel more natural.");
 
 @end

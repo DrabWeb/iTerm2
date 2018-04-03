@@ -31,6 +31,7 @@
 #import "FutureMethods.h"
 #import "ITAddressBookMgr.h"
 #import "iTermAdvancedSettingsModel.h"
+#import "iTermApplication.h"
 #import "iTermBuriedSessions.h"
 #import "iTermHotKeyController.h"
 #import "NSArray+iTerm.h"
@@ -53,7 +54,7 @@
 #import "iTermApplicationDelegate.h"
 #import "iTermExpose.h"
 #import "iTermFullScreenWindowManager.h"
-#import "iTermGrowlDelegate.h"
+#import "iTermNotificationController.h"
 #import "iTermKeyBindingMgr.h"
 #import "iTermPreferences.h"
 #import "iTermProfilePreferences.h"
@@ -87,7 +88,7 @@ static iTermController *gSharedInstance;
     dispatch_once(&onceToken, ^{
         gSharedInstance = [[iTermController alloc] init];
     });
-    
+
     return gSharedInstance;
 }
 
@@ -125,8 +126,8 @@ static iTermController *gSharedInstance;
         _restorableSessions = [[NSMutableArray alloc] init];
         _currentRestorableSessionsStack = [[NSMutableArray alloc] init];
         // Activate Growl. This loads the Growl framework and initializes it.
-        [iTermGrowlDelegate sharedInstance];
-        
+        [iTermNotificationController sharedInstance];
+
         [[[NSWorkspace sharedWorkspace] notificationCenter] addObserver:self
                                                                selector:@selector(workspaceWillPowerOff:)
                                                                    name:NSWorkspaceWillPowerOffNotification
@@ -368,16 +369,24 @@ static iTermController *gSharedInstance;
     NSMutableArray *terminalArrangements = [NSMutableArray arrayWithCapacity:[_terminalWindows count]];
     if (allWindows) {
         for (PseudoTerminal *terminal in _terminalWindows) {
-            [terminalArrangements addObject:[terminal arrangement]];
+            NSDictionary *arrangement = [terminal arrangement];
+            if (arrangement) {
+                [terminalArrangements addObject:arrangement];
+            }
         }
     } else {
         PseudoTerminal *currentTerminal = [self currentTerminal];
         if (!currentTerminal) {
             return;
         }
-        [terminalArrangements addObject:[currentTerminal arrangement]];
+        NSDictionary *arrangement = [currentTerminal arrangement];
+        if (arrangement) {
+            [terminalArrangements addObject:arrangement];
+        }
     }
-    [WindowArrangements setArrangement:terminalArrangements withName:name];
+    if (terminalArrangements.count) {
+        [WindowArrangements setArrangement:terminalArrangements withName:name];
+    }
 }
 
 - (void)tryOpenArrangement:(NSDictionary *)terminalArrangement {
@@ -589,7 +598,7 @@ static iTermController *gSharedInstance;
     if (_arrangeHorizontallyPendingFullScreenTransitions) {
         return;
     }
-    
+
     DLog(@"Actually arranging");
 
     // For each screen, find the terminals in it and arrange them. This way
@@ -772,10 +781,10 @@ static iTermController *gSharedInstance;
     switch (selection) {
         case kiTermWarningSelection0:
             return YES;
-            
+
         case kiTermWarningSelection1:
             return NO;
-            
+
         default:
             return YES;
     }
@@ -892,6 +901,8 @@ static iTermController *gSharedInstance;
             // subsequent to this will appear in the previous space. This is short enough of a
             // delay that it's not annoying when you're already there.
             [NSThread sleepForTimeInterval:0.3];
+
+            [NSApp activateIgnoringOtherApps:YES];
         }
     }
 }
@@ -952,7 +963,7 @@ static iTermController *gSharedInstance;
                                                               withProfile:profile
                                                                      show:NO];
     [profileHotKey setAllowsStateRestoration:NO];
-    
+
     [self addTerminalWindow:term];
     return term;
 }
@@ -1064,12 +1075,12 @@ static iTermController *gSharedInstance;
     DLog(@"makeKey: %@", @(makeKey));
     DLog(@"canActivate: %@", @(canActivate));
     DLog(@"command: %@", command);
-    
+
     PseudoTerminal *term;
     NSDictionary *aDict;
     const iTermObjectType objectType = theTerm ? iTermTabObject : iTermWindowObject;
     const BOOL isHotkey = (hotkeyWindowType != iTermHotkeyWindowTypeNone);
-    
+
     aDict = bookmarkData;
     if (aDict == nil) {
         aDict = [self defaultBookmark];
@@ -1160,9 +1171,16 @@ static iTermController *gSharedInstance;
             canActivate = NO;
         }
         if (canActivate) {
-            [NSApp activateIgnoringOtherApps:YES];
+            // activateIgnoringApp: happens asynchronously which means doing makeKeyAndOrderFront:
+            // immediately after it won't do what you want. Issue 6397
+            NSWindow *termWindow = [[term window] retain];
+            [[iTermApplication sharedApplication] activateAppWithCompletion:^{
+                [termWindow makeKeyAndOrderFront:nil];
+                [termWindow release];
+            }];
+        } else {
+            [[term window] makeKeyAndOrderFront:nil];
         }
-        [[term window] makeKeyAndOrderFront:nil];
         if (canActivate) {
             [NSApp arrangeInFront:self];
         }
@@ -1362,7 +1380,10 @@ static iTermController *gSharedInstance;
     assert([iTermAdvancedSettingsModel runJobsInServers]);
     for (iTermRestorableSession *restorableSession in _restorableSessions) {
         for (PTYSession *aSession in restorableSession.sessions) {
-            [aSession.shell sendSignal:SIGHUP];
+            if (aSession.shell.serverPid != -1) {
+                [aSession.shell sendSignal:SIGKILL toServer:YES];
+            }
+            [aSession.shell sendSignal:SIGHUP toServer:YES];
         }
     }
 }
@@ -1453,9 +1474,10 @@ static iTermController *gSharedInstance;
 }
 
 - (void)openSingleUseWindowWithCommand:(NSString *)command {
-    const BOOL background = [command hasSuffix:@"&"];
-    if (background) {
+    if ([command hasSuffix:@"&"] && command.length > 1) {
         command = [command substringToIndex:command.length - 1];
+        system(command.UTF8String);
+        return;
     }
     NSString *escapedCommand = [command stringWithEscapedShellCharactersIncludingNewlines:YES];
     command = [NSString stringWithFormat:@"sh -c \"%@\"", escapedCommand];
@@ -1468,17 +1490,15 @@ static iTermController *gSharedInstance;
               inTerminal:nil
                  withURL:nil
         hotkeyWindowType:iTermHotkeyWindowTypeNone
-                 makeKey:!background
-             canActivate:!background
+                 makeKey:YES
+             canActivate:YES
                  command:command
                    block:^PTYSession *(Profile *profile, PseudoTerminal *term) {
                        profile = [profile dictionaryBySettingObject:@"" forKey:KEY_INITIAL_TEXT];
                        profile = [profile dictionaryBySettingObject:@YES forKey:KEY_CLOSE_SESSIONS_ON_END];
+                       term.window.collectionBehavior = NSWindowCollectionBehaviorFullScreenNone;
                        PTYSession *session = [term createTabWithProfile:profile withCommand:command];
                        session.isSingleUseSession = YES;
-                       if (background) {
-                           [term.window orderOut:nil];
-                       }
                        return session;
                    }];
 }

@@ -84,6 +84,8 @@
 		A662E7911BD4932A00B79B8B /* HSB@2x.png in Resources */ = {isa = PBXBuildFile; fileRef = A662E78F1BD4932A00B79B8B /* HSB@2x.png */; };
 		A662E7941BD4933A00B79B8B /* RGB.png in Resources */ = {isa = PBXBuildFile; fileRef = A662E7921BD4933A00B79B8B /* RGB.png */; };
 		A662E7951BD4933A00B79B8B /* RGB@2x.png in Resources */ = {isa = PBXBuildFile; fileRef = A662E7931BD4933A00B79B8B /* RGB@2x.png */; };
+		A6E1748E206DD85F00E70F8D /* CPKScreenshot.h in Headers */ = {isa = PBXBuildFile; fileRef = A6E1748C206DD85F00E70F8D /* CPKScreenshot.h */; };
+		A6E1748F206DD85F00E70F8D /* CPKScreenshot.m in Sources */ = {isa = PBXBuildFile; fileRef = A6E1748D206DD85F00E70F8D /* CPKScreenshot.m */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -196,6 +198,8 @@
 		A662E78F1BD4932A00B79B8B /* HSB@2x.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; name = "HSB@2x.png"; path = "Images.xcassets/HSB/HSB@2x.png"; sourceTree = "<group>"; };
 		A662E7921BD4933A00B79B8B /* RGB.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; name = RGB.png; path = Images.xcassets/RGB/RGB.png; sourceTree = "<group>"; };
 		A662E7931BD4933A00B79B8B /* RGB@2x.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; name = "RGB@2x.png"; path = "Images.xcassets/RGB/RGB@2x.png"; sourceTree = "<group>"; };
+		A6E1748C206DD85F00E70F8D /* CPKScreenshot.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = CPKScreenshot.h; sourceTree = "<group>"; };
+		A6E1748D206DD85F00E70F8D /* CPKScreenshot.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = CPKScreenshot.m; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -312,6 +316,8 @@
 				A6184F5F1BAA0BC30088EF3C /* NSObject+CPK.m */,
 				A6184F2D1BA9D55D0088EF3C /* Resources */,
 				A6184EAB1BA874020088EF3C /* Supporting Files */,
+				A6E1748C206DD85F00E70F8D /* CPKScreenshot.h */,
+				A6E1748D206DD85F00E70F8D /* CPKScreenshot.m */,
 			);
 			path = ColorPicker;
 			sourceTree = "<group>";
@@ -487,6 +493,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				A6184EAE1BA874020088EF3C /* ColorPicker.h in Headers */,
+				A6E1748E206DD85F00E70F8D /* CPKScreenshot.h in Headers */,
 				A6184F571BAA06DC0088EF3C /* CPKSwatchView.h in Headers */,
 				A6184EFD1BA8814B0088EF3C /* CPKGradientView.h in Headers */,
 				A6184EEE1BA876390088EF3C /* CPKMainViewController.h in Headers */,
@@ -574,7 +581,7 @@
 		A6184E9F1BA874020088EF3C /* Project object */ = {
 			isa = PBXProject;
 			attributes = {
-				LastUpgradeCheck = 0700;
+				LastUpgradeCheck = 0900;
 				ORGANIZATIONNAME = Google;
 				TargetAttributes = {
 					A6184EA71BA874020088EF3C = {
@@ -679,6 +686,7 @@
 				A6184F4C1BA9D7740088EF3C /* CPKColorNamer.m in Sources */,
 				A6184F0F1BA8C3560088EF3C /* CPKControlsView.m in Sources */,
 				A6184EFE1BA8814B0088EF3C /* CPKGradientView.m in Sources */,
+				A6E1748F206DD85F00E70F8D /* CPKScreenshot.m in Sources */,
 				A6184F7A1BAA5E1A0088EF3C /* CPKSliderView.m in Sources */,
 				A6184F171BA8E87B0088EF3C /* CPKFavorite.m in Sources */,
 				A6184F581BAA06DC0088EF3C /* CPKSwatchView.m in Sources */,
@@ -740,13 +748,21 @@
 				CLANG_CXX_LIBRARY = "libc++";
 				CLANG_ENABLE_MODULES = YES;
 				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
 				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
 				CLANG_WARN_CONSTANT_CONVERSION = YES;
 				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
 				CLANG_WARN_EMPTY_BODY = YES;
 				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
 				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
 				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
 				CLANG_WARN_UNREACHABLE_CODE = YES;
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				COPY_PHASE_STRIP = NO;
@@ -786,13 +802,21 @@
 				CLANG_CXX_LIBRARY = "libc++";
 				CLANG_ENABLE_MODULES = YES;
 				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
 				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
 				CLANG_WARN_CONSTANT_CONVERSION = YES;
 				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
 				CLANG_WARN_EMPTY_BODY = YES;
 				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
 				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
 				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
 				CLANG_WARN_UNREACHABLE_CODE = YES;
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				COPY_PHASE_STRIP = NO;

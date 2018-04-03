@@ -64,6 +64,7 @@ NSString *const kTerminalStateAltSavedCursorKey = @"Alt Saved Cursor";
 NSString *const kTerminalStateAllowColumnModeKey = @"Allow Column Mode";
 NSString *const kTerminalStateColumnModeKey = @"Column Mode";
 NSString *const kTerminalStateDisableSMCUPAndRMCUPKey = @"Disable Alt Screen";
+NSString *const kTerminalStateSoftAlternateScreenModeKey = @"Soft Alternate Screen Mode";
 NSString *const kTerminalStateInCommandKey = @"In Command";
 NSString *const kTerminalStateUnicodeVersionStack = @"Unicode Version Stack";
 NSString *const kTerminalStateURL = @"URL";
@@ -81,6 +82,9 @@ NSString *const kTerminalStateURLParams = @"URL Params";
 @property(nonatomic, assign) BOOL disableSmcupRmcup;
 @property(nonatomic, retain) NSURL *url;
 @property(nonatomic, retain) NSString *urlParams;
+
+// Records whether the remote side thinks we're in alternate screen mode.
+@property(nonatomic, readonly) BOOL softAlternateScreenMode;
 
 // A write-only property, at the moment. TODO: What should this do?
 @property(nonatomic, assign) BOOL strictAnsiMode;
@@ -355,6 +359,8 @@ static const int kMaxScreenRows = 4096;
     if (userInitiated) {
         [_parser reset];
     }
+    [delegate_ terminalShowPrimaryBuffer];
+    _softAlternateScreenMode = NO;
     [delegate_ terminalResetPreservingPrompt:userInitiated];
 }
 
@@ -546,6 +552,7 @@ static const int kMaxScreenRows = 4096;
                         [delegate_ terminalSetCursorY:y];
                     }
                 }
+                _softAlternateScreenMode = mode;
                 break;
 
             case 69:
@@ -611,6 +618,7 @@ static const int kMaxScreenRows = 4096;
                         [self restoreCursor];
                     }
                 }
+                _softAlternateScreenMode = mode;
                 break;
 
             case 2004:
@@ -684,30 +692,40 @@ static const int kMaxScreenRows = 4096;
                     graphicRendition_.bgColorMode = ColorModeAlternate;
                     break;
                 case VT100CHARATTR_FG_256:
-                    // First subparam means:   # additional subparams:  Accepts optional params:
-                    // 1: transparent          0                        NO
-                    // 2: RGB                  3                        YES
-                    // 3: CMY                  3                        YES
-                    // 4: CMYK                 4                        YES
-                    // 5: Indexed color        1                        NO
+                    // The actual spec for this is called ITU T.416-199303
+                    // You can download it for free! If you prefer to spend money, ISO/IEC 8613-6
+                    // is supposedly the same thing.
                     //
-                    // Optional paramters go at position 7 and 8, and indicate toleranace as an
-                    // integer; and color space (0=CIELUV, 1=CIELAB). Example:
+                    // Here's a sad story about CSI 38:2, which is used to do 24-bit color.
                     //
-                    // CSI 38:2:255:128:64:0:5:1 m
+                    // Lots of terminal emulators, iTerm2 included, misunderstood the spec. That's
+                    // easy to understand if you read it, which I can't recommend doing unless
+                    // you're looking for inspiration for your next Bulwer-Lytton Fiction Contest
+                    // entry.
                     //
-                    // Also accepted for xterm compatibility, but never with optional parameters:
-                    // CSI 38;2;255;128;64 m
+                    // See issue 6377 for more context.
                     //
-                    // Set the foreground color to red=255, green=128, blue=64 with a tolerance of
-                    // 5 in the CIELAB color space. The 0 at the 6th position has no meaning and
-                    // is just a filler.
-                    // 
-                    // For 256-color mode (indexed) use this for the foreground:
-                    // CSI 38;5;N m
-                    // where N is a value between 0 and 255. See the colors described in screen_char_t
-                    // in the comments for fgColorCode.
-
+                    // Ignoring color types we don't support like CMYK, the spec says to do this:
+                    // CSI 38:2:[color space]:[red]:[green]:[blue]:[unused]:[tolerance]:[tolerance colorspace]
+                    //
+                    // Everything after [blue] is optional. Values are decimal numbers in 0...255.
+                    //
+                    // Unfortunately, what was implemented for a long time was this:
+                    // CSI 38:2:[red]:[green]:[blue]:[unused]:[tolerance]:[tolerance colorspace]
+                    //
+                    // And for xterm compatibility, the following was also accepted:
+                    // CSI 38;2;[red];[green];[blue]
+                    //
+                    // The New Order
+                    // -------------
+                    // Tolerance never did anything, so we'll accept this non-standards compliant
+                    // code, which people use:
+                    // CSI 38:2:[red]:[green]:[blue]
+                    //
+                    // As well as the following forms:
+                    // CSI 38:2:[colorspace]:[red]:[green]:[blue]
+                    // CSI 38:2:[colorspace]:[red]:[green]:[blue]:<one or more additional colon-delimited arguments, all ignored>
+                    // CSI 38;2;[red];[green];[blue]   // Notice semicolons in place of colons here
                     if (token.csi->subCount[i] > 0) {
                         // Preferred syntax using colons to delimit subparameters
                         if (token.csi->subCount[i] >= 2 && token.csi->sub[i][0] == 5) {
@@ -717,15 +735,30 @@ static const int kMaxScreenRows = 4096;
                             graphicRendition_.fgBlue = 0;
                             graphicRendition_.fgColorMode = ColorModeNormal;
                         } else if (token.csi->subCount[i] >= 4 && token.csi->sub[i][0] == 2) {
-                            // CSI 38:2:R:G:B m
                             // 24-bit color
-                            graphicRendition_.fgColorCode = token.csi->sub[i][1];
-                            graphicRendition_.fgGreen = token.csi->sub[i][2];
-                            graphicRendition_.fgBlue = token.csi->sub[i][3];
-                            graphicRendition_.fgColorMode = ColorMode24bit;
+                            if (token.csi->subCount[i] >= 5) {
+                                // Spec-compliant. Likely rarely used in 2017.
+                                // CSI 38:2:colorspace:R:G:B m
+                                // TODO: Respect the color space argument. See ITU-T Rec. T.414,
+                                // but good luck actually finding the colour space IDs.
+                                graphicRendition_.fgColorCode = token.csi->sub[i][2];
+                                graphicRendition_.fgGreen = token.csi->sub[i][3];
+                                graphicRendition_.fgBlue = token.csi->sub[i][4];
+                                graphicRendition_.fgColorMode = ColorMode24bit;
+                            } else {
+                                // Misinterpration compliant.
+                                // CSI 38:2:R:G:B m  <- misinterpration compliant
+                                graphicRendition_.fgColorCode = token.csi->sub[i][1];
+                                graphicRendition_.fgGreen = token.csi->sub[i][2];
+                                graphicRendition_.fgBlue = token.csi->sub[i][3];
+                                graphicRendition_.fgColorMode = ColorMode24bit;
+                            }
                         }
                     } else if (token.csi->count - i >= 3 && token.csi->p[i + 1] == 5) {
-                        // CSI 38;5;P m
+                        // For 256-color mode (indexed) use this for the foreground:
+                        // CSI 38;5;N m
+                        // where N is a value between 0 and 255. See the colors described in screen_char_t
+                        // in the comments for fgColorCode.
                         graphicRendition_.fgColorCode = token.csi->p[i + 2];
                         graphicRendition_.fgGreen = 0;
                         graphicRendition_.fgBlue = 0;
@@ -733,6 +766,7 @@ static const int kMaxScreenRows = 4096;
                         i += 2;
                     } else if (token.csi->count - i >= 5 && token.csi->p[i + 1] == 2) {
                         // CSI 38;2;R;G;B m
+                        // Hack for xterm compatibility
                         // 24-bit color support
                         graphicRendition_.fgColorCode = token.csi->p[i + 2];
                         graphicRendition_.fgGreen = token.csi->p[i + 3];
@@ -885,7 +919,7 @@ static const int kMaxScreenRows = 4096;
             case 1337:  // iTerm2 extension
                 [delegate_ terminalSendReport:[self.output reportiTerm2Version]];
                 break;
-                
+
             case 0: // Response from VT100 -- Ready, No malfuctions detected
             default:
                 break;
@@ -1297,7 +1331,7 @@ static const int kMaxScreenRows = 4096;
             [delegate_ terminalBackspace];
             break;
         case VT100CC_HT:
-            [delegate_ terminalAppendTabAtCursor];
+            [delegate_ terminalAppendTabAtCursor:!_softAlternateScreenMode];
             break;
         case VT100CC_LF:
         case VT100CC_VT:
@@ -1633,6 +1667,10 @@ static const int kMaxScreenRows = 4096;
             [self executeDecSetReset:token];
             break;
 
+        case VT100CSI_REP:
+            [delegate_ terminalRepeatPreviousCharacter:token.csi->p[0]];
+            break;
+
             // ANSI CSI
         case ANSICSI_CBT:
             [delegate_ terminalBackTab:token.csi->p[0]];
@@ -1670,11 +1708,11 @@ static const int kMaxScreenRows = 4096;
 
             // XTERM extensions
         case XTERMCC_WIN_TITLE:
-            [delegate_ terminalSetWindowTitle:[token.string stringByReplacingControlCharsWithQuestionMark]];
+            [delegate_ terminalSetWindowTitle:[self sanitizedTitle:[token.string stringByReplacingControlCharsWithQuestionMark]]];
             break;
         case XTERMCC_WINICON_TITLE:
-            [delegate_ terminalSetWindowTitle:[token.string stringByReplacingControlCharsWithQuestionMark]];
-            [delegate_ terminalSetIconTitle:[token.string stringByReplacingControlCharsWithQuestionMark]];
+            [delegate_ terminalSetWindowTitle:[self sanitizedTitle:[token.string stringByReplacingControlCharsWithQuestionMark]]];
+            [delegate_ terminalSetIconTitle:[self sanitizedTitle:[token.string stringByReplacingControlCharsWithQuestionMark]]];
             break;
         case XTERMCC_PASTE64: {
             if (token.string) {
@@ -1899,6 +1937,14 @@ static const int kMaxScreenRows = 4096;
             [self executeWorkingDirectoryURL:token];
             break;
 
+        case XTERMCC_TEXT_FOREGROUND_COLOR:
+            [self executeXtermTextColorForeground:YES arg:token.string];
+            break;
+
+        case XTERMCC_TEXT_BACKGROUND_COLOR:
+            [self executeXtermTextColorForeground:NO arg:token.string];
+            break;
+
         case XTERMCC_LINK:
             [self executeLink:token];
             break;
@@ -1959,6 +2005,37 @@ static const int kMaxScreenRows = 4096;
     }
 }
 
+- (NSArray<NSNumber *> *)xtermParseColorArgument:(NSString *)part {
+    if ([part hasPrefix:@"rgb:"]) {
+        // The format of this command is "<index>;rgb:<redhex>/<greenhex>/<bluehex>", e.g. "105;rgb:00/cc/ff"
+        NSString *componentsString = [part substringFromIndex:4];
+        NSArray *components = [componentsString componentsSeparatedByString:@"/"];
+        if (components.count == 3) {
+            CGFloat colors[3];
+            BOOL ok = YES;
+            for (int j = 0; j < 3; j++) {
+                NSScanner *scanner = [NSScanner scannerWithString:components[j]];
+                unsigned int intValue;
+                if (![scanner scanHexInt:&intValue]) {
+                    ok = NO;
+                } else {
+                    ok = (intValue <= 255);
+                }
+                if (ok) {
+                    int limit = (1 << (4 * [components[j] length])) - 1;
+                    colors[j] = (CGFloat)intValue / (CGFloat)limit;
+                } else {
+                    break;
+                }
+            }
+            if (ok) {
+                return @[ @(colors[0]), @(colors[1]), @(colors[2]) ];
+            }
+        }
+    }
+    return nil;
+}
+
 - (void)executeXtermSetRgb:(VT100Token *)token {
     NSArray *parts = [token.string componentsSeparatedByString:@";"];
     int theIndex = 0;
@@ -1967,41 +2044,18 @@ static const int kMaxScreenRows = 4096;
         if ((i % 2) == 0 ) {
             theIndex = [part intValue];
         } else {
-            if ([part hasPrefix:@"rgb:"]) {
-                // The format of this command is "<index>;rgb:<redhex>/<greenhex>/<bluehex>", e.g. "105;rgb:00/cc/ff"
-                NSString *componentsString = [part substringFromIndex:4];
-                NSArray *components = [componentsString componentsSeparatedByString:@"/"];
-                if (components.count == 3) {
-                    CGFloat colors[3];
-                    BOOL ok = YES;
-                    for (int j = 0; j < 3; j++) {
-                        NSScanner *scanner = [NSScanner scannerWithString:components[j]];
-                        unsigned int intValue;
-                        if (![scanner scanHexInt:&intValue]) {
-                            ok = NO;
-                        } else {
-                            ok = (intValue <= 255);
-                        }
-                        if (ok) {
-                            int limit = (1 << (4 * [components[j] length])) - 1;
-                            colors[j] = (CGFloat)intValue / (CGFloat)limit;
-                        } else {
-                            break;
-                        }
-                    }
-                    if (ok) {
-                        NSColor *srgb = [NSColor colorWithSRGBRed:colors[0]
-                                                            green:colors[1]
-                                                             blue:colors[2]
-                                                            alpha:1];
-                        NSColor *theColor = [srgb colorUsingColorSpaceName:NSCalibratedRGBColorSpace];
-                        [delegate_ terminalSetColorTableEntryAtIndex:theIndex
-                                                               color:theColor];
-                    }
-                }
+            NSArray<NSNumber *> *components = [self xtermParseColorArgument:part];
+            if (components) {
+                NSColor *srgb = [NSColor colorWithSRGBRed:components[0].doubleValue
+                                                    green:components[1].doubleValue
+                                                     blue:components[2].doubleValue
+                                                    alpha:1];
+                NSColor *theColor = [srgb colorUsingColorSpaceName:NSCalibratedRGBColorSpace];
+                [delegate_ terminalSetColorTableEntryAtIndex:theIndex
+                                                       color:theColor];
             } else if ([part isEqualToString:@"?"]) {
                 NSColor *theColor = [delegate_ terminalColorForIndex:theIndex];
-                [delegate_ terminalSendReport:[self.output reportColor:theColor atIndex:theIndex]];
+                [delegate_ terminalSendReport:[self.output reportColor:theColor atIndex:theIndex prefix:@"4;"]];
             }
         }
     }
@@ -2102,6 +2156,27 @@ static const int kMaxScreenRows = 4096;
     value = @"";
   }
   return @[ key, value ];
+}
+
+- (void)executeXtermTextColorForeground:(BOOL)foreground arg:(NSString *)arg {
+    // arg is like one of:
+    //   rgb:ffff/ffff/ffff
+    //   ?
+    const VT100TerminalColorIndex ptyIndex = foreground ? VT100TerminalColorIndexText : VT100TerminalColorIndexBackground;
+    const int xtermIndex = foreground ? 10 : 11;
+    if ([arg isEqualToString:@"?"]) {
+        NSColor *theColor = [delegate_ terminalColorForIndex:ptyIndex];
+        [delegate_ terminalSendReport:[self.output reportColor:theColor atIndex:xtermIndex prefix:@""]];
+    } else {
+        NSArray<NSNumber *> *components = [self xtermParseColorArgument:arg];
+        NSColor *srgb = [NSColor colorWithSRGBRed:components[0].doubleValue
+                                            green:components[1].doubleValue
+                                             blue:components[2].doubleValue
+                                            alpha:1];
+        NSColor *theColor = [srgb colorUsingColorSpaceName:NSCalibratedRGBColorSpace];
+        [delegate_ terminalSetColorTableEntryAtIndex:ptyIndex
+                                               color:theColor];
+    }
 }
 
 - (void)executeWorkingDirectoryURL:(VT100Token *)token {
@@ -2426,6 +2501,7 @@ static const int kMaxScreenRows = 4096;
     switch ([command characterAtIndex:0]) {
         case 'A':
             // Sequence marking the start of the command prompt (FTCS_PROMPT_START)
+            _softAlternateScreenMode = NO;  // We can reasonably assume alternate screen mode has ended if there's a prompt. Could be ssh dying, etc.
             [delegate_ terminalPromptDidStart];
             break;
 
@@ -2642,6 +2718,7 @@ static const int kMaxScreenRows = 4096;
            kTerminalStateAllowColumnModeKey: @(self.allowColumnMode),
            kTerminalStateColumnModeKey: @(self.columnMode),
            kTerminalStateDisableSMCUPAndRMCUPKey: @(self.disableSmcupRmcup),
+           kTerminalStateSoftAlternateScreenModeKey: @(_softAlternateScreenMode),
            kTerminalStateInCommandKey: @(inCommand_),
            kTerminalStateUnicodeVersionStack: _unicodeVersionStack,
            kTerminalStateURL: self.url ?: [NSNull null],
@@ -2690,10 +2767,26 @@ static const int kMaxScreenRows = 4096;
     self.allowColumnMode = [dict[kTerminalStateAllowColumnModeKey] boolValue];
     self.columnMode = [dict[kTerminalStateColumnModeKey] boolValue];
     self.disableSmcupRmcup = [dict[kTerminalStateDisableSMCUPAndRMCUPKey] boolValue];
+    _softAlternateScreenMode = [dict[kTerminalStateSoftAlternateScreenModeKey] boolValue];
     inCommand_ = [dict[kTerminalStateInCommandKey] boolValue];
     [_unicodeVersionStack removeAllObjects];
     if (dict[kTerminalStateUnicodeVersionStack]) {
         [_unicodeVersionStack addObjectsFromArray:dict[kTerminalStateUnicodeVersionStack]];
+    }
+}
+
+- (NSString *)sanitizedTitle:(NSString *)unsafeTitle {
+    // Very long titles are slow to draw in the tabs. Limit their length and
+    // cut off anything after newline since it wouldn't be visible anyway.
+    NSCharacterSet *newlinesCharacterSet = [NSCharacterSet characterSetWithCharactersInString:@"\r\n"];
+    NSRange newlineRange = [unsafeTitle rangeOfCharacterFromSet:newlinesCharacterSet];
+
+    if (newlineRange.location != NSNotFound) {
+        return [unsafeTitle substringToIndex:newlineRange.location];
+    } else if (unsafeTitle.length > 256) {
+        return [unsafeTitle substringToIndex:256];
+    } else {
+        return unsafeTitle;
     }
 }
 

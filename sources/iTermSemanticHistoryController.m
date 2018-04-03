@@ -118,7 +118,6 @@ NSString *const kSemanticHistoryWorkingDirectorySubstitutionKey = @"semanticHist
         }
         return path;
     }
-
     // If path doesn't exist and it starts with "a/" or "b/" (from `diff`).
     if ([origPath isMatchedByRegex:@"^[ab]/"]) {
         DLog(@"  Treating as diff path");
@@ -331,7 +330,9 @@ NSString *const kSemanticHistoryWorkingDirectorySubstitutionKey = @"semanticHist
 
     BOOL isRawAction = [prefs_[kSemanticHistoryActionKey] isEqualToString:kSemanticHistoryRawCommandAction];
     if (!isRawAction) {
-        path = [self getFullPath:path workingDirectory:workingDirectory lineNumber:&lineNumber columnNumber:&columnNumber];
+        path = [self getFullPath:path workingDirectory:workingDirectory
+                      lineNumber:&lineNumber
+                    columnNumber:&columnNumber];
         DLog(@"Not a raw action. New path is %@, line number is %@", path, lineNumber);
     }
 
@@ -481,7 +482,7 @@ NSString *const kSemanticHistoryWorkingDirectorySubstitutionKey = @"semanticHist
                 rightChunk = afterChunks[j];
             }
             [right appendString:rightChunk];
-            
+
             NSString *possiblePath = [left stringByAppendingString:right];
             NSString *trimmedPath = possiblePath;
             if (trimWhitespace) {
@@ -507,7 +508,10 @@ NSString *const kSemanticHistoryWorkingDirectorySubstitutionKey = @"semanticHist
             for (NSString *modifiedPossiblePath in [self pathsFromPath:trimmedPath byRemovingBadSuffixes:questionableSuffixes]) {
                 BOOL exists = NO;
                 if (workingDirectoryIsOk || [modifiedPossiblePath hasPrefix:@"/"]) {
-                    exists = ([self getFullPath:modifiedPossiblePath workingDirectory:workingDirectory lineNumber:NULL columnNumber:NULL] != nil);
+                    exists = ([self getFullPath:modifiedPossiblePath
+                               workingDirectory:workingDirectory
+                                     lineNumber:NULL
+                                   columnNumber:NULL] != nil);
                 }
                 if (exists) {
                     if (charsTakenFromPrefixPtr) {

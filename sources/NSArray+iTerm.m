@@ -13,6 +13,14 @@
 
 @implementation NSArray (iTerm)
 
++ (NSArray<NSNumber *> *)sequenceWithRange:(NSRange)range {
+    NSMutableArray<NSNumber *> *temp = [NSMutableArray array];
+    for (NSUInteger i = 0; i < range.length; i++) {
+        [temp addObject:@(i + range.location)];
+    }
+    return temp;
+}
+
 - (NSArray *)objectsOfClasses:(NSArray *)classes {
     NSMutableArray *result = [NSMutableArray array];
     for (NSObject *object in self) {
@@ -101,6 +109,24 @@
         }
     }
     return max;
+}
+
+- (NSArray *)mininumsWithComparator:(NSComparisonResult (^)(id, id))comparator {
+    id min = nil;
+    for (id object in self) {
+        if (min == nil || comparator(min, object) == NSOrderedDescending) {
+            min = object;
+        }
+    }
+    NSMutableArray *result = [NSMutableArray array];
+    if (min) {
+        for (id object in self) {
+            if (comparator(object, min) == NSOrderedSame) {
+                [result addObject:object];
+            }
+        }
+    }
+    return result;
 }
 
 - (BOOL)anyWithBlock:(BOOL (^)(id anObject))block {
@@ -252,6 +278,14 @@
     return reduction;
 }
 
+- (id)reduceWithFirstValue:(id)firstValue block:(id (^)(id first, id second))block {
+    id reduction = firstValue;
+    for (NSInteger i = 0; i < self.count; i++) {
+        reduction = block(reduction, self[i]);
+    }
+    return reduction;
+}
+
 - (NSURL *)lowestCommonAncestorOfURLs {
     if (self.count == 0) {
         return nil;
@@ -284,6 +318,27 @@
     }
     NSString *path = [[componentsArrays.firstObject subarrayWithRange:NSMakeRange(0, i)] componentsJoinedByString:@"/"];
     return [NSURL fileURLWithPath:path];
+}
+
+- (void)enumerateCoalescedObjectsWithComparator:(BOOL (^)(id obj1, id obj2))comparator
+                                          block:(void (^)(id object, NSUInteger count))block {
+    id previous = self.firstObject;
+    NSUInteger count = 1;
+    const NSUInteger n = self.count;
+    for (NSUInteger i = 1; i < n; i++) {
+        id thisObject = self[i];
+        const BOOL isEqual = comparator(previous, thisObject);
+        if (isEqual) {
+            count++;
+        } else {
+            block(previous, count);
+            previous = thisObject;
+            count = 1;
+        }
+    }
+    if (previous) {
+        block(previous, count);
+    }
 }
 
 @end

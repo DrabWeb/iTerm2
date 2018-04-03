@@ -10,7 +10,7 @@
  **
  **  Project: iTerm
  **
- **  Description: overrides sendEvent: so that key mappings with command mask  
+ **  Description: overrides sendEvent: so that key mappings with command mask
  **               are handled properly.
  **
  **  This program is free software; you can redistribute it and/or modify
@@ -30,6 +30,9 @@
 
 #import <Cocoa/Cocoa.h>
 #import "PTYWindow.h"
+
+// Used for keys you can press on the touch bar that have no equivalent on physical keyboards that Apple recognizes
+extern unsigned short iTermBogusVirtualKeyCode;
 
 @class iTermApplicationDelegate;
 @class iTermScriptingWindow;
@@ -53,8 +56,11 @@
 
 - (void)sendEvent:(NSEvent *)anEvent;
 - (iTermApplicationDelegate<iTermApplicationDelegate> *)delegate;
+- (BOOL)routeEventToShortcutInputView:(NSEvent *)event;
 
 // Like orderedWindows, but only iTermWindow/iTermPanel objects wrapped in iTermScriptingWindow*s are returned.
 - (NSArray<iTermScriptingWindow *> *)orderedScriptingWindows;
+
+- (void)activateAppWithCompletion:(void (^)(void))completion;
 
 @end

@@ -10,6 +10,7 @@
 #import "iTermPreferences.h"
 #import "NSColor+iTerm.h"
 #import "NSDictionary+iTerm.h"
+#import "NSObject+iTerm.h"
 #import "NSStringITerm.h"
 #import "NSTextField+iTerm.h"
 #import "PreferencePanel.h"
@@ -179,7 +180,10 @@ NSString *const kPreferenceDidChangeFromOtherPanelKeyUserInfoKey = @"key";
 
             case kPreferenceInfoTypeIntegerTextField:
                 [self applyIntegerConstraints:info];
-                [self setInt:[sender separatorTolerantIntValue] forKey:info.key];
+                const int intValue = [sender separatorTolerantIntValue];
+                if (!info.deferUpdate) {
+                    [self setInt:intValue forKey:info.key];
+                }
                 break;
 
             case kPreferenceInfoTypeDoubleTextField: {
@@ -198,7 +202,7 @@ NSString *const kPreferenceDidChangeFromOtherPanelKeyUserInfoKey = @"key";
                 }
                 break;
             }
-                
+
             case kPreferenceInfoTypeUnsignedIntegerTextField:
                 [self applyUnsignedIntegerConstraints:info];
                 [self setUnsignedInteger:[sender separatorTolerantUnsignedIntegerValue] forKey:info.key];
@@ -223,7 +227,7 @@ NSString *const kPreferenceDidChangeFromOtherPanelKeyUserInfoKey = @"key";
                 assert([sender selectedTag]>=0);
                 [self setUnsignedInteger:[sender selectedTag] forKey:info.key];
                 break;
-                
+
             case kPreferenceInfoTypeSlider:
                 [self setFloat:[sender doubleValue] forKey:info.key];
                 break;
@@ -424,6 +428,33 @@ NSString *const kPreferenceDidChangeFromOtherPanelKeyUserInfoKey = @"key";
     // Documented as doing nothing.
 }
 
+#pragma mark - Private
+
+- (void)saveDeferredUpdates {
+    [_keys enumerateObjectsUsingBlock:^(id  _Nonnull key, BOOL * _Nonnull stop) {
+        PreferenceInfo *info = [self infoForKey:key];
+        if (info.deferUpdate) {
+            switch (info.type) {
+                case kPreferenceInfoTypeIntegerTextField:
+                    [self setInt:[[NSTextField castFrom:info.control] separatorTolerantIntValue] forKey:key];
+                    break;
+
+                case kPreferenceInfoTypeCheckbox:
+                case kPreferenceInfoTypeInvertedCheckbox:
+                case kPreferenceInfoTypeUnsignedIntegerTextField:
+                case kPreferenceInfoTypeDoubleTextField:
+                case kPreferenceInfoTypeStringTextField:
+                case kPreferenceInfoTypePopup:
+                case kPreferenceInfoTypeUnsignedIntegerPopup:
+                case kPreferenceInfoTypeSlider:
+                case kPreferenceInfoTypeTokenField:
+                case kPreferenceInfoTypeMatrix:
+                case kPreferenceInfoTypeColorWell:
+                    break;
+            }
+        }
+    }];
+}
 #pragma mark - Constraints
 
 // Pick out the digits from s and clamp it to a range.
@@ -442,7 +473,7 @@ NSString *const kPreferenceDidChangeFromOtherPanelKeyUserInfoKey = @"key";
 
 - (NSUInteger)unsignedIntegerForString:(NSString *)s inRange:(NSRange)range {
     NSString *i = [s stringWithOnlyDigits];
-    
+
     NSUInteger val = 0;
     if ([i length]) {
         val = [i iterm_unsignedIntegerValue];
@@ -510,11 +541,17 @@ NSString *const kPreferenceDidChangeFromOtherPanelKeyUserInfoKey = @"key";
             case kPreferenceInfoTypeSlider:
             case kPreferenceInfoTypeStringTextField:
             case kPreferenceInfoTypeTokenField:
-            case kPreferenceInfoTypeIntegerTextField:
             case kPreferenceInfoTypeUnsignedIntegerPopup:
             case kPreferenceInfoTypeUnsignedIntegerTextField:
                 break;
-                
+
+            case kPreferenceInfoTypeIntegerTextField:
+                if (info.deferUpdate) {
+                    const int intValue = [[NSTextField castFrom:info.control] separatorTolerantIntValue];
+                    [self setInt:intValue forKey:info.key];
+                }
+                break;
+
             case kPreferenceInfoTypeDoubleTextField:
                 // Replace the control with its canonical value. Only floating point text fields can
                 // temporarily take illegal values, which are tolerated until editing ends.
@@ -534,11 +571,14 @@ NSString *const kPreferenceDidChangeFromOtherPanelKeyUserInfoKey = @"key";
     }
     PreferenceInfo *info = [self infoForKey:key];
     assert(info);
-    [self updateValueForInfo:info];
+    if (!info.deferUpdate) {
+        [self updateValueForInfo:info];
+    }
 }
 
 - (void)preferencePanelWillClose:(NSNotification *)notification {
     if (_preferencePanel == notification.object) {
+        [self saveDeferredUpdates];
         // Give subclasses a chance to do something first.
         [self windowWillClose];
 

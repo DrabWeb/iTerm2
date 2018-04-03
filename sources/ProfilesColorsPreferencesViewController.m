@@ -64,6 +64,8 @@ static NSString * const kColorGalleryURL = @"https://www.iterm2.com/colorgallery
     IBOutlet CPKColorWell *_guideColor;
 
     IBOutlet NSPopUpButton *_presetsPopupButton;
+    IBOutlet NSView *_bwWarning1;
+    IBOutlet NSView *_bwWarning2;
 }
 
 + (NSArray<NSString *> *)presetNames {
@@ -156,9 +158,10 @@ static NSString * const kColorGalleryURL = @"https://www.iterm2.com/colorgallery
                           type:kPreferenceInfoTypeCheckbox];
     info.observer = ^() { [self updateColorControlsEnabled]; };
 
-    [self defineControl:_minimumContrast
-                    key:KEY_MINIMUM_CONTRAST
-                   type:kPreferenceInfoTypeSlider];
+    info = [self defineControl:_minimumContrast
+                           key:KEY_MINIMUM_CONTRAST
+                          type:kPreferenceInfoTypeSlider];
+    info.observer = ^() { [self maybeWarnAboutExcessiveContrast]; };
 
     [self defineControl:_cursorBoost
                     key:KEY_CURSOR_BOOST
@@ -168,16 +171,30 @@ static NSString * const kColorGalleryURL = @"https://www.iterm2.com/colorgallery
                     key:KEY_USE_CURSOR_GUIDE
                    type:kPreferenceInfoTypeCheckbox];
 
+    [self maybeWarnAboutExcessiveContrast];
     [self updateColorControlsEnabled];
+}
+
+- (void)maybeWarnAboutExcessiveContrast {
+    const BOOL hidden = ([self floatForKey:KEY_MINIMUM_CONTRAST] < 0.97);
+    _bwWarning1.hidden = hidden;
+    _bwWarning2.hidden = hidden;
 }
 
 - (void)updateColorControlsEnabled {
     _tabColor.enabled = [self boolForKey:KEY_USE_TAB_COLOR];
     _underlineColor.enabled = [self boolForKey:KEY_USE_UNDERLINE_COLOR];
-    _cursorColor.enabled = ![self boolForKey:KEY_SMART_CURSOR_COLOR];
-    _cursorTextColor.enabled = ![self boolForKey:KEY_SMART_CURSOR_COLOR];
-    _cursorColorLabel.labelEnabled = ![self boolForKey:KEY_SMART_CURSOR_COLOR];
-    _cursorTextColorLabel.labelEnabled = ![self boolForKey:KEY_SMART_CURSOR_COLOR];
+
+    const BOOL smartCursorColorSelected = [self boolForKey:KEY_SMART_CURSOR_COLOR];
+    const BOOL shouldEnableSmartCursorColor = ([self intForKey:KEY_CURSOR_TYPE] == CURSOR_BOX);
+    const BOOL shouldEnableCursorColor = !(smartCursorColorSelected && shouldEnableSmartCursorColor);
+
+    _cursorColor.enabled = shouldEnableCursorColor;
+    _cursorTextColor.enabled = shouldEnableCursorColor;
+    _cursorColorLabel.labelEnabled = shouldEnableCursorColor;
+    _cursorTextColorLabel.labelEnabled = shouldEnableCursorColor;
+
+    _useSmartCursorColor.enabled = shouldEnableSmartCursorColor;
 }
 
 - (NSDictionary *)colorWellDictionary {
@@ -263,7 +280,7 @@ static NSString * const kColorGalleryURL = @"https://www.iterm2.com/colorgallery
 
     // Display the dialog.  If the OK button was pressed,
     // process the files.
-    if ([openPanel legacyRunModalForDirectory:nil file:nil] == NSModalResponseOK) {
+    if ([openPanel runModal] == NSModalResponseOK) {
         // Get an array containing the full filenames of all
         // files and directories selected.
         for (NSString* filename in [openPanel legacyFilenames]) {
@@ -279,8 +296,8 @@ static NSString * const kColorGalleryURL = @"https://www.iterm2.com/colorgallery
     // Set options.
     [savePanel setAllowedFileTypes:[NSArray arrayWithObject:@"itermcolors"]];
 
-    if ([savePanel legacyRunModalForDirectory:nil file:nil] == NSModalResponseOK) {
-        [self exportColorPresetToFile:[savePanel legacyFilename]];
+    if ([savePanel runModal] == NSModalResponseOK) {
+        [self exportColorPresetToFile:savePanel.URL.path];
     }
 }
 

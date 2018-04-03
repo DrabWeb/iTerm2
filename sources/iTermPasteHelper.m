@@ -271,14 +271,14 @@ const int kNumberOfSpacesPerTabNoConversion = -1;
 - (void)pasteEventImmediately:(PasteEvent *)pasteEvent {
     // A queued up paste command might have wanted bracketing but the host might not accept it
     // any more.
-    if (![_delegate pasteHelperShouldBracket]) {
+    if (pasteEvent.isUpload || ![_delegate pasteHelperShouldBracket]) {
         pasteEvent.flags = pasteEvent.flags & ~kPasteFlagsBracket;
     }
 
     [iTermPasteHelper sanitizePasteEvent:pasteEvent encoding:[_delegate pasteHelperEncoding]];
 
     // Save to history
-    if (pasteEvent.string.length > 0) {
+    if (!pasteEvent.isUpload && pasteEvent.string.length > 0) {
         DLog(@"Save string being pasted to history");
         [[PasteboardHistory sharedInstance] save:pasteEvent.string];
     }
@@ -389,12 +389,17 @@ const int kNumberOfSpacesPerTabNoConversion = -1;
                                                  _pasteViewController.view.frame.size.height);
     [view addSubview:_pasteViewController.view];
     [_pasteViewController updateFrame];
+    _pasteViewIsVisible = YES;
+    [self.delegate pasteHelperPasteViewVisibilityDidChange];
 }
 
 - (void)hidePasteIndicator {
-    [_pasteViewController close];
+    [_pasteViewController closeWithCompletion:^{
+        [self.delegate pasteHelperPasteViewVisibilityDidChange];
+    }];
     [_pasteViewController release];
     _pasteViewController = nil;
+    _pasteViewIsVisible = NO;
 }
 
 - (void)updatePasteIndicator {
@@ -525,7 +530,7 @@ const int kNumberOfSpacesPerTabNoConversion = -1;
     NSArray *lines = [pasteEvent.string componentsSeparatedByRegex:@"(?:\r\n)|(?:\r)|(?:\n)"];
     NSString *theTitle;
     NSMutableArray<iTermWarningAction *> *actions = [NSMutableArray array];
-    
+
     __block BOOL result = YES;
     iTermWarningAction *cancel = [iTermWarningAction warningActionWithLabel:@"Cancel"
                                                                       block:^(iTermWarningSelection selection) { result = NO; }];
@@ -539,7 +544,7 @@ const int kNumberOfSpacesPerTabNoConversion = -1;
                                                      [pasteEvent.string stringByTrimmingTrailingCharactersFromCharacterSet:newlines];
                                                  result = YES;
                                              }];
-    
+
     [actions addObject:paste];
     [actions addObject:cancel];
     NSString *identifier = [iTermAdvancedSettingsModel noSyncDoNotWarnBeforeMultilinePasteUserDefaultsKey];
@@ -569,7 +574,7 @@ const int kNumberOfSpacesPerTabNoConversion = -1;
     }
     // Issue 5115
     [iTermWarning unsilenceIdentifier:identifier ifSelectionEquals:[actions indexOfObjectIdenticalTo:cancel]];
-    
+
     iTermWarning *warning = [[[iTermWarning alloc] init] autorelease];
     warning.title = theTitle;
     warning.warningActions = actions;

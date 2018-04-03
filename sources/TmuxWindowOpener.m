@@ -81,7 +81,7 @@ NSString *const kTmuxWindowOpenerWindowOptionStyleValueFullScreen = @"FullScreen
     [_zoomed release];
     [_tabColors release];
     [_profile release];
-    
+
     [super dealloc];
 }
 
@@ -328,7 +328,7 @@ static int OctalValue(const char *bytes) {
         if (!term) {
             BOOL useOriginalWindow =
                 [iTermPreferences intForKey:kPreferenceKeyOpenTmuxWindowsIn] == kOpenTmuxWindowsAsNativeTabsInExistingWindow;
-            if (useOriginalWindow) {
+            if (self.initial && useOriginalWindow) {
                 term = [gateway_ window];
                 DLog(@"Use original window %@", term);
             }
@@ -444,7 +444,7 @@ static int OctalValue(const char *bytes) {
     if (self.tabColors[n]) {
         parseTree[kLayoutDictTabColorKey] = self.tabColors[n];
     }
-    
+
     return nil;
 }
 
